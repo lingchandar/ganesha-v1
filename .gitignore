@@ -1,0 +1,30 @@
+# Secrets
+config/.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+audit_logs/
+
+# ML models (large binary files)
+models/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini

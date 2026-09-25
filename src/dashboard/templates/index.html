@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🕉️ GANESHA V1 — Real-Time Swing Trading Agentic AI</title>
+  <meta name="description" content="Institutional-grade agentic AI swing trading analysis engine for NSE equities.">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Top Header Navigation -->
+    <header class="header-glass">
+      <div class="brand-wrapper">
+        <span class="brand-icon">🕉️</span>
+        <div>
+          <h1 class="brand-title">GANESHA V1</h1>
+          <p class="brand-tagline">Real-Time Swing Trading Agentic AI · High-Liquidity NSE Universe</p>
+        </div>
+      </div>
+
+      <div class="header-badges">
+        <span class="badge badge-sebi">
+          <span class="pulse-dot"></span>
+          SEBI Signal-Only · Manual Execution
+        </span>
+        <span id="regime-badge" class="badge badge-regime">
+          REGIME: BULLISH
+        </span>
+      </div>
+    </header>
+
+    <!-- Top Key Metrics Row -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">
+          <span>Market Regime (Nifty 50)</span>
+          <span>📊</span>
+        </div>
+        <div class="metric-value" id="metric-regime">BULLISH</div>
+        <div class="metric-sub" id="metric-regime-sub">Nifty > 50 EMA > 200 EMA</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">
+          <span>Derivative Expiry Gate</span>
+          <span>📅</span>
+        </div>
+        <div class="metric-value" id="metric-expiry">NORMAL (1.50x)</div>
+        <div class="metric-sub" id="metric-expiry-sub">Final 3 sessions tighten to 1.725x</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">
+          <span>High-Conviction Setups</span>
+          <span>🎯</span>
+        </div>
+        <div class="metric-value" id="metric-watchlist-count">0 Stocks</div>
+        <div class="metric-sub">Zero-Compromise filter active</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label">
+          <span>Broker Ingestion Client</span>
+          <span>⚡</span>
+        </div>
+        <div class="metric-value">FYERS API v3</div>
+        <div class="metric-sub">Read-Only Protected · Anti-Loop Active</div>
+      </div>
+    </section>
+
+    <!-- Main Core Layout -->
+    <main class="main-layout">
+      
+      <!-- Left Column: Active Watchlist -->
+      <section class="card-glass">
+        <div class="card-title-row">
+          <h2 class="card-title">
+            <span>🎯</span> Verified Swing Trading Watchlist (5–15 Day Horizon)
+          </h2>
+          <span id="scan-timestamp" style="font-size: 12px; color: var(--text-dim); font-family: var(--font-mono);">
+            Awaiting Next Scan
+          </span>
+        </div>
+
+        <div class="table-responsive">
+          <table class="watchlist-table">
+            <thead>
+              <tr>
+                <th>Ticker Symbol</th>
+                <th>Setup Class</th>
+                <th>Recommended Entry</th>
+                <th>Structural SL (-1R)</th>
+                <th>Target Price (+2R)</th>
+                <th>R : R</th>
+                <th>Invalidation Anchor</th>
+              </tr>
+            </thead>
+            <tbody id="watchlist-body">
+              <tr>
+                <td colspan="7">
+                  <div class="empty-state">
+                    <div class="empty-icon">🛡️</div>
+                    <p style="font-weight: 600; color: var(--text-main);">STATUS: NO ACTIVE WATCHLIST LOADED</p>
+                    <p style="font-size: 13px; margin-top: 4px;">Connect Fyers API key tomorrow morning to run real-time Nifty 100 candle ingestion.</p>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Right Column: Gemini Agentic AI Reasoning Card -->
+      <aside class="card-glass">
+        <div class="card-title-row">
+          <h2 class="card-title">
+            <span>🧠</span> Agentic AI Orchestrator
+          </h2>
+          <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: var(--accent-gold);">Gemini 2.5 Flash</span>
+        </div>
+
+        <div class="ai-reasoning-box" id="ai-reasoning-content">
+          <p><strong>Awaiting Live Market Scan...</strong></p>
+          <p>The Gemini Agentic Orchestrator autonomously validates every candidate across:</p>
+          <ul style="padding-left: 20px; line-height: 1.8;">
+            <li>Nifty 50 macro trend health (50/200 EMA)</li>
+            <li>Dual-layer Mansfield Relative Strength</li>
+            <li>Corporate Action Timing Buffer (CATB 5-day blackout)</li>
+            <li>Institutional delivery accumulation (&gt;1.5x 5-day SMA)</li>
+            <li>Strict +2R target vs -1R structural stop-loss</li>
+          </ul>
+        </div>
+      </aside>
+
+    </main>
+
+    <!-- Bottom Section: Interactive Precision Exit Simulator -->
+    <section class="card-glass" style="margin-bottom: 24px;">
+      <div class="card-title-row">
+        <h2 class="card-title">
+          <span>⏱️</span> Real-Time Swing Exit Rule Simulator
+        </h2>
+        <span style="font-size: 12px; color: var(--text-muted);">Enforces 5 Real-Time Exit Conditions (+2R, Stop, Gap, Invalidation, 15-Day Limit)</span>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Entry Price (₹)</label>
+          <input type="number" step="0.05" id="inp-entry" class="form-input" value="1000.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Stop-Loss Level (-1R) (₹)</label>
+          <input type="number" step="0.05" id="inp-sl" class="form-input" value="950.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Take-Profit Target (+2R) (₹)</label>
+          <input type="number" step="0.05" id="inp-target" class="form-input" value="1100.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Technical Invalidation Anchor (₹)</label>
+          <input type="number" step="0.05" id="inp-inval" class="form-input" value="970.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Days Held (1 to 15)</label>
+          <input type="number" id="inp-days" class="form-input" value="4" min="1" max="15">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Today's Market Open Price (₹)</label>
+          <input type="number" step="0.05" id="inp-open" class="form-input" value="1020.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Today's Day High (₹)</label>
+          <input type="number" step="0.05" id="inp-high" class="form-input" value="1105.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Today's Day Low (₹)</label>
+          <input type="number" step="0.05" id="inp-low" class="form-input" value="1015.00">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Today's Day Close (₹)</label>
+          <input type="number" step="0.05" id="inp-close" class="form-input" value="1095.00">
+        </div>
+
+        <div class="form-group" style="justify-content: flex-end;">
+          <button id="btn-eval-exit" class="btn-primary" onclick="simulateExitRule()">Evaluate Exit Rule</button>
+        </div>
+      </div>
+
+      <div id="exit-result-display" class="exit-result-card">
+        <p><strong>Exit Trigger Status:</strong> <span id="res-status" style="font-family: var(--font-mono); font-weight: 700;"></span></p>
+        <p style="margin-top: 4px;"><strong>Exit Fill Price:</strong> <span id="res-price" style="font-family: var(--font-mono);"></span></p>
+        <p style="margin-top: 4px;"><strong>Realized R-Multiple:</strong> <span id="res-r" style="font-family: var(--font-mono);"></span></p>
+        <p style="margin-top: 4px; color: var(--text-dim);" id="res-notes"></p>
+      </div>
+    </section>
+
+    <!-- Forensic Audit Log Section -->
+    <section class="card-glass">
+      <div class="card-title-row">
+        <h2 class="card-title">
+          <span>📑</span> Immutable Forensic Audit Logs (Module 14, 27a)
+        </h2>
+        <button class="badge" style="background: rgba(255, 255, 255, 0.05); color: #fff; cursor: pointer; border: 1px solid var(--border-subtle);" onclick="fetchAuditLogs()">
+          Refresh Logs
+        </button>
+      </div>
+
+      <div id="audit-log-list" style="font-size: 13px; color: var(--text-muted);">
+        <p>Loading audit records from PostgreSQL / filesystem...</p>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    async function loadDashboardData() {
+      try {
+        const res = await fetch('/api/watchlist');
+        const data = await res.json();
+
+        if (data.status && data.status !== "NO_SCAN_DATA") {
+          document.getElementById('metric-regime').textContent = data.market_regime?.regime || "CLEAR";
+          document.getElementById('metric-watchlist-count').textContent = (data.watchlist?.length || 0) + " Stocks";
+          document.getElementById('scan-timestamp').textContent = "Scan ID: " + (data.scan_id?.slice(0, 8) || "N/A");
+
+          if (data.watchlist && data.watchlist.length > 0) {
+            const tbody = document.getElementById('watchlist-body');
+            tbody.innerHTML = '';
+            data.watchlist.forEach(item => {
+              const tr = document.createElement('tr');
+              tr.className = 'table-row';
+              tr.innerHTML = `
+                <td class="ticker-cell">${item.ticker_symbol}</td>
+                <td><span class="setup-pill">${item.setup_type}</span></td>
+                <td class="price-cell price-entry">₹${item.entry_price.toFixed(2)}</td>
+                <td class="price-cell price-sl">₹${item.stop_loss.toFixed(2)}</td>
+                <td class="price-cell price-target">₹${item.target_price.toFixed(2)}</td>
+                <td class="price-cell" style="color: var(--accent-gold); font-weight: 700;">${item.risk_reward_ratio}R</td>
+                <td class="price-cell" style="color: var(--text-dim);">₹${item.invalidation_level.toFixed(2)}</td>
+              `;
+              tbody.appendChild(tr);
+            });
+          }
+
+          if (data.agentic_reasoning) {
+            document.getElementById('ai-reasoning-content').innerHTML = `
+              <p><strong>Gemini 2.5 Flash Synthesis:</strong></p>
+              <p>${data.agentic_reasoning.replace(/\\n/g, '<br>')}</p>
+            `;
+          }
+        }
+      } catch (err) {
+        console.warn("Watchlist API error:", err);
+      }
+    }
+
+    async function simulateExitRule() {
+      const payload = {
+        entry_price: parseFloat(document.getElementById('inp-entry').value),
+        stop_loss: parseFloat(document.getElementById('inp-sl').value),
+        target_price: parseFloat(document.getElementById('inp-target').value),
+        invalidation_level: parseFloat(document.getElementById('inp-inval').value),
+        days_held: parseInt(document.getElementById('inp-days').value),
+        open_price: parseFloat(document.getElementById('inp-open').value),
+        high_price: parseFloat(document.getElementById('inp-high').value),
+        low_price: parseFloat(document.getElementById('inp-low').value),
+        close_price: parseFloat(document.getElementById('inp-close').value),
+      };
+
+      try {
+        const res = await fetch('/api/exit/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+
+        const display = document.getElementById('exit-result-display');
+        display.style.display = 'block';
+
+        const statusEl = document.getElementById('res-status');
+        statusEl.textContent = result.exit_reason;
+        statusEl.style.color = result.is_exit_triggered ? 'var(--accent-emerald)' : 'var(--accent-gold)';
+
+        document.getElementById('res-price').textContent = '₹' + result.exit_price.toFixed(2);
+        document.getElementById('res-r').textContent = (result.realized_r_multiple > 0 ? '+' : '') + result.realized_r_multiple.toFixed(2) + 'R (' + result.pnl_percentage.toFixed(2) + '%)';
+        document.getElementById('res-notes').textContent = result.diagnostic_notes;
+      } catch (err) {
+        alert("Exit simulation failed: " + err);
+      }
+    }
+
+    async function fetchAuditLogs() {
+      try {
+        const res = await fetch('/api/audit-logs');
+        const data = await res.json();
+        const container = document.getElementById('audit-log-list');
+
+        if (data.records && data.records.length > 0) {
+          container.innerHTML = data.records.map(r => `
+            <div style="padding: 10px 14px; margin-bottom: 8px; background: rgba(0,0,0,0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <span style="font-family: var(--font-mono); color: var(--accent-cyan);">${r.scan_id ? r.scan_id.slice(0, 8) : 'RECORD'}</span> · 
+                <span style="color: var(--text-dim);">${r.timestamp || ''}</span>
+              </div>
+              <div>
+                <span class="setup-pill" style="margin-right: 8px;">Approved: ${r.approved_count}</span>
+                <span style="font-size: 11px; color: var(--text-dim);">${r.status || ''}</span>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = '<p style="color: var(--text-dim);">No audit files recorded yet.</p>';
+        }
+      } catch (err) {
+        console.warn("Audit logs error:", err);
+      }
+    }
+
+    // Initialize on load
+    loadDashboardData();
+    fetchAuditLogs();
+  </script>
+</body>
+</html>

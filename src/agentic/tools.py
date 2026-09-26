@@ -19,6 +19,8 @@ from src.regime.market_regime import MarketRegimeEngine
 from src.regime.sector_strength import RelativeStrengthEngine
 from src.setups.swing_setups import SwingSetupScanner
 from src.risk.exit_engine import PrecisionExitEngine
+from src.risk.position_sizer import PositionSizingEngine
+from src.risk.circuit_breakers import PortfolioCircuitBreakers
 
 
 def get_market_regime(nifty_candles_df: pd.DataFrame, india_vix: Optional[float] = None) -> Dict[str, Any]:
@@ -120,3 +122,81 @@ def evaluate_exit_status(
         "pnl_percentage": res.pnl_percentage,
         "diagnostic_notes": res.diagnostic_notes,
     }
+
+
+def calculate_risk_envelope(
+    ticker_symbol: str,
+    entry_price: float,
+    stop_loss: float,
+    target_price: Optional[float] = None,
+    total_capital: Optional[float] = None,
+    max_risk_pct: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Computes 1% friction-adjusted position sizing with full Indian statutory delivery taxes,
+    DP charges, slippage buffer, and allocated share quantity.
+    """
+    res = PositionSizingEngine.calculate_position_size(
+        ticker_symbol=ticker_symbol,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        target_price=target_price,
+        total_capital=total_capital,
+        max_risk_pct=max_risk_pct,
+    )
+    return res.to_dict()
+
+
+def check_portfolio_circuit_breakers(
+    active_positions: List[Dict[str, Any]],
+    candidate_ticker: str,
+    candidate_sector: str,
+    candidate_risk_inr: float,
+    total_capital: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Validates candidate against:
+    - 5 concurrent positions limit
+    - 2 per sector concentration cap
+    - 5% aggregate capital-at-risk limit
+    """
+    res = PortfolioCircuitBreakers.evaluate_candidate_capacity(
+        active_positions=active_positions,
+        candidate_ticker=candidate_ticker,
+        candidate_sector=candidate_sector,
+        candidate_risk_inr=candidate_risk_inr,
+        total_capital=total_capital,
+    )
+    return res.to_dict()
+
+
+def check_correlated_drawdown(
+    recent_closed_trades: List[Dict[str, Any]],
+    current_date: date,
+) -> Dict[str, Any]:
+    """
+    Evaluates Correlated-Drawdown Pause Rule (>= 3 stop-outs in trailing 7 days -> 7 day pause).
+    """
+    status = PortfolioCircuitBreakers.check_correlated_drawdown_pause(
+        recent_closed_trades=recent_closed_trades,
+        current_date=current_date,
+    )
+    return status.to_dict()
+
+
+def evaluate_sector_relative_strength(
+    stock_series: pd.Series,
+    sector_series: pd.Series,
+    nifty_series: pd.Series,
+) -> Dict[str, Any]:
+    """
+    Evaluates dual-layer relative strength:
+    1. Sector ROC20 > 0 relative to Nifty 50
+    2. Stock Mansfield RS > 0 against BOTH Nifty 50 and Sector Index
+    """
+    return RelativeStrengthEngine.evaluate_dual_layer_filter(
+        stock_series=stock_series,
+        sector_series=sector_series,
+        nifty_series=nifty_series,
+    )
+

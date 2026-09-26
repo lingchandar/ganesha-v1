@@ -3,7 +3,7 @@ Unit tests for Precision Exit Timing Engine (src/risk/exit_engine.py).
 Ensures all 5 exit conditions operate with zero emotional interference.
 """
 import pytest
-from src.risk/exit_engine import PrecisionExitEngine, ExitReason
+from src.risk.exit_engine import PrecisionExitEngine, ExitReason
 
 
 def test_target_hit_plus_2r():

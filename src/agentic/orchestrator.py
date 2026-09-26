@@ -25,6 +25,9 @@ from src.agentic.tools import (
     check_catb_blackout,
     evaluate_institutional_delivery,
     calculate_risk_coordinates,
+    calculate_risk_envelope,
+    check_portfolio_circuit_breakers,
+    check_correlated_drawdown,
 )
 from src.setups.swing_setups import SwingSetupScanner, SwingSetupSignal
 
@@ -65,6 +68,8 @@ class GaneshaAgenticOrchestrator:
         trade_date: Optional[date] = None,
         scan_mode: str = "WEEKEND_DEEP_SCAN",
         india_vix: Optional[float] = None,
+        active_positions: Optional[List[Dict[str, Any]]] = None,
+        recent_closed_trades: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Execute full end-to-end institutional swing scan.
@@ -88,7 +93,38 @@ class GaneshaAgenticOrchestrator:
         trade_date_iso = scan_date.isoformat()
         tool_call_trace: List[Dict[str, Any]] = []
 
+        active_positions = active_positions or []
+        recent_closed_trades = recent_closed_trades or []
+
         logger.info(f"Initiating GANESHA V1 Swing Scan for {trade_date_iso} [{scan_mode}]")
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 0: Correlated-Drawdown Pause Brake
+        # ═══════════════════════════════════════════════════════════════════════
+        drawdown_status = check_correlated_drawdown(recent_closed_trades, scan_date)
+        tool_call_trace.append({"tool": "check_correlated_drawdown", "result": drawdown_status})
+
+        if drawdown_status["is_system_paused"]:
+            reason = drawdown_status["status_message"]
+            logger.warning(f"Scan halted by drawdown circuit breaker: {reason}")
+
+            scan_id = self.audit_logger.log_scan_run(
+                scan_type=scan_mode,
+                market_regime={},
+                expiry_status={},
+                approved_candidates=[],
+                rejected_candidates=[],
+                agentic_reasoning=f"Correlated-Drawdown Pause Active. {reason}",
+                tool_call_trace=tool_call_trace,
+                execution_status="DRAWDOWN_PAUSE_ACTIVE",
+            )
+            return {
+                "status": "DRAWDOWN_PAUSE_ACTIVE",
+                "message": reason,
+                "pause_until_date": drawdown_status.get("pause_until_date"),
+                "approved_watchlist": [],
+                "scan_id": scan_id,
+            }
 
         # ═══════════════════════════════════════════════════════════════════════
         # STEP 1: Market Regime Clearance
@@ -194,15 +230,56 @@ class GaneshaAgenticOrchestrator:
                 })
                 continue
 
-            # Candidate passed all deterministic gates!
+            # Gate E: Friction-Adjusted Position Sizing (1% Risk Rule)
+            sizing = calculate_risk_envelope(
+                ticker_symbol=ticker,
+                entry_price=top_signal.entry_price,
+                stop_loss=top_signal.stop_loss,
+                target_price=risk_coords["target_price"],
+            )
+            tool_call_trace.append({"tool": "calculate_risk_envelope", "ticker": ticker, "result": sizing})
+
+            if not sizing["is_executable"]:
+                rejected_candidates.append({
+                    "ticker": ticker,
+                    "setup_found": top_signal.setup_type,
+                    "reason": sizing["rejection_reason"]
+                })
+                continue
+
+            # Gate F: Portfolio Circuit Breakers (Capacity + Sector + Aggregate Risk)
+            sector = data.get("sector", "UNKNOWN")
+            cb_check = check_portfolio_circuit_breakers(
+                active_positions=active_positions + approved_candidates,
+                candidate_ticker=ticker,
+                candidate_sector=sector,
+                candidate_risk_inr=sizing["capital_at_risk_net_inr"],
+            )
+            tool_call_trace.append({"tool": "check_portfolio_circuit_breakers", "ticker": ticker, "result": cb_check})
+
+            if not cb_check["is_allowed"]:
+                rejected_candidates.append({
+                    "ticker": ticker,
+                    "setup_found": top_signal.setup_type,
+                    "reason": cb_check["rejection_reason"]
+                })
+                continue
+
+            # Candidate passed ALL deterministic + risk gates!
             candidate_item = {
                 "ticker_symbol": ticker,
+                "sector": sector,
                 "setup_type": top_signal.setup_type,
                 "entry_price": risk_coords["entry_price"],
                 "stop_loss": risk_coords["stop_loss"],
                 "target_price": risk_coords["target_price"],
                 "risk_reward_ratio": risk_coords["risk_reward_ratio"],
                 "risk_per_share": risk_coords["risk_per_share"],
+                "shares_to_buy": sizing["shares_to_buy"],
+                "capital_required_inr": sizing["capital_required_inr"],
+                "capital_at_risk_net_inr": sizing["capital_at_risk_net_inr"],
+                "friction_total_inr": sizing["friction"]["total_friction_inr"],
+                "risk_percentage_of_account": sizing["risk_percentage_of_account"],
                 "atr_14": top_signal.atr_14,
                 "delivery_expansion_ratio": delivery_check["expansion_ratio"],
                 "invalidation_level": top_signal.invalidation_level,

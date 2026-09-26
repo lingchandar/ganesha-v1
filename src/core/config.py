@@ -64,10 +64,11 @@ class GaneshaConfig(BaseSettings):
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 
-    class Config:
-        env_file = str(Path(__file__).resolve().parent.parent.parent / "config" / ".env")
-        env_file_encoding = "utf-8"
-        extra = "ignore"  # Ignore unknown env vars without raising errors
+    model_config = {
+        "env_file": str(Path(__file__).resolve().parent.parent.parent / "config" / ".env"),
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 # ── Singleton Configuration Instance ──

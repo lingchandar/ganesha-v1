@@ -188,15 +188,19 @@ def evaluate_sector_relative_strength(
     stock_series: pd.Series,
     sector_series: pd.Series,
     nifty_series: pd.Series,
+    stock_symbol: str = "STOCK",
+    sector_name: str = "SECTOR",
 ) -> Dict[str, Any]:
     """
     Evaluates dual-layer relative strength:
     1. Sector ROC20 > 0 relative to Nifty 50
     2. Stock Mansfield RS > 0 against BOTH Nifty 50 and Sector Index
     """
-    return RelativeStrengthEngine.evaluate_dual_layer_filter(
-        stock_series=stock_series,
-        sector_series=sector_series,
-        nifty_series=nifty_series,
+    return RelativeStrengthEngine.evaluate_dual_layer_relative_strength(
+        stock_close=stock_series,
+        sector_close=sector_series,
+        nifty_close=nifty_series,
+        stock_symbol=stock_symbol,
+        sector_name=sector_name,
     )
 

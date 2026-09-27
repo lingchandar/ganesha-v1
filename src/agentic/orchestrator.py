@@ -28,6 +28,7 @@ from src.agentic.tools import (
     calculate_risk_envelope,
     check_portfolio_circuit_breakers,
     check_correlated_drawdown,
+    evaluate_sector_relative_strength,
 )
 from src.setups.swing_setups import SwingSetupScanner, SwingSetupSignal
 
@@ -264,6 +265,34 @@ class GaneshaAgenticOrchestrator:
                     "reason": cb_check["rejection_reason"]
                 })
                 continue
+
+            # Gate G: Dual-Layer Mansfield Relative Strength Filter
+            sector_series = data.get("sector_series")
+            nifty_series = data.get("nifty_series")
+            if nifty_series is None and "close" in nifty_history_df.columns:
+                nifty_series = nifty_history_df["close"]
+            elif nifty_series is None and "Close" in nifty_history_df.columns:
+                nifty_series = nifty_history_df["Close"]
+
+            stock_close_series = df_stock["close"] if "close" in df_stock.columns else df_stock["Close"]
+
+            if sector_series is not None and nifty_series is not None:
+                rs_check = evaluate_sector_relative_strength(
+                    stock_series=stock_close_series,
+                    sector_series=sector_series,
+                    nifty_series=nifty_series,
+                    stock_symbol=ticker,
+                    sector_name=sector,
+                )
+                tool_call_trace.append({"tool": "evaluate_sector_relative_strength", "ticker": ticker, "result": rs_check})
+
+                if not rs_check["passes_rs_filter"]:
+                    rejected_candidates.append({
+                        "ticker": ticker,
+                        "setup_found": top_signal.setup_type,
+                        "reason": rs_check["rejection_reason"]
+                    })
+                    continue
 
             # Candidate passed ALL deterministic + risk gates!
             candidate_item = {

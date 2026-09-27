@@ -113,11 +113,11 @@ class RelativeStrengthEngine:
             )
 
         return {
-            "passes_rs_filter": passes_dual_layer,
+            "passes_rs_filter": bool(passes_dual_layer),
             "rejection_reason": rejection_reason,
             "mrs_stock_vs_nifty": round(float(stock_vs_nifty_mrs), 2),
             "mrs_stock_vs_sector": round(float(stock_vs_sector_mrs), 2),
             "sector_roc_20_vs_nifty": round(float(sector_roc_vs_nifty), 2),
-            "is_sector_leader": sector_outperforming,
-            "is_stock_leader": stock_outperforming,
+            "is_sector_leader": bool(sector_outperforming),
+            "is_stock_leader": bool(stock_outperforming),
         }

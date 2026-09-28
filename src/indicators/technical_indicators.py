@@ -138,9 +138,20 @@ class TechnicalAnalysisEngine:
     def compute_all_features(cls, df: pd.DataFrame) -> pd.DataFrame:
         """
         Compute full deterministic indicator suite for a stock's daily OHLCV history.
-        DataFrame must contain: [open_price, high_price, low_price, close_price, volume_traded]
+        Supports both [open_price, ...] and standard [open, ...] column names.
         """
         df = df.copy()
+        col_map = {
+            "open": "open_price", "Open": "open_price",
+            "high": "high_price", "High": "high_price",
+            "low": "low_price", "Low": "low_price",
+            "close": "close_price", "Close": "close_price",
+            "volume": "volume_traded", "Volume": "volume_traded",
+        }
+        for col, target in col_map.items():
+            if col in df.columns and target not in df.columns:
+                df[target] = df[col]
+
         close = df["close_price"]
 
         # EMAs

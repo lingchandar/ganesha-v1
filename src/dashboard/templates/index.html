@@ -309,19 +309,19 @@
 
         if (data.records && data.records.length > 0) {
           container.innerHTML = data.records.map(r => `
-            <div style="padding: 10px 14px; margin-bottom: 8px; background: rgba(0,0,0,0.3); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
+            <div class="audit-record">
               <div>
-                <span style="font-family: var(--font-mono); color: var(--accent-cyan);">${r.scan_id ? r.scan_id.slice(0, 8) : 'RECORD'}</span> · 
-                <span style="color: var(--text-dim);">${r.timestamp || ''}</span>
+                <span class="audit-id">${r.scan_id ? r.scan_id.slice(0, 8) : 'RECORD'}</span>
+                <span class="audit-time">${r.timestamp || ''}</span>
               </div>
-              <div>
-                <span class="setup-pill" style="margin-right: 8px;">Approved: ${r.approved_count}</span>
-                <span style="font-size: 11px; color: var(--text-dim);">${r.status || ''}</span>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <span class="setup-pill" style="font-size: 10px;">Approved: ${r.approved_count}</span>
+                <span class="audit-status">${r.status || 'UNKNOWN'}</span>
               </div>
             </div>
           `).join('');
         } else {
-          container.innerHTML = '<p style="color: var(--text-dim);">No audit files recorded yet.</p>';
+          container.innerHTML = '<div class="empty-state" style="padding: 30px;"><div class="empty-icon" style="font-size: 30px;">📂</div><p style="font-weight: 600;">No audit files recorded yet.</p></div>';
         }
       } catch (err) {
         console.warn("Audit logs error:", err);

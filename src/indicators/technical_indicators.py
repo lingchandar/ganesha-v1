@@ -152,6 +152,11 @@ class TechnicalAnalysisEngine:
             if col in df.columns and target not in df.columns:
                 df[target] = df[col]
 
+        # Cast OHLCV columns from Decimal to float64 (PostgreSQL returns Decimal)
+        for col in ["open_price", "high_price", "low_price", "close_price", "volume_traded"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+
         close = df["close_price"]
 
         # EMAs

@@ -51,11 +51,16 @@ class GaneshaAgenticOrchestrator:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.api_key)
-                self._gemini_client = genai.GenerativeModel(
-                    model_name="gemini-2.5-flash",
-                    system_instruction=GANESHA_SYSTEM_INSTRUCTION
-                )
-                logger.info("Gemini 2.5 Flash agentic model initialized successfully.")
+                for m_name in ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]:
+                    try:
+                        self._gemini_client = genai.GenerativeModel(
+                            model_name=m_name,
+                            system_instruction=GANESHA_SYSTEM_INSTRUCTION
+                        )
+                        logger.info(f"Gemini agentic model ({m_name}) initialized successfully.")
+                        break
+                    except Exception:
+                        continue
             except Exception as e:
                 logger.warning(f"Could not initialize Gemini model ({e}); running in deterministic mode.")
                 self._gemini_client = None

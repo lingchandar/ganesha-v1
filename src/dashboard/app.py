@@ -58,9 +58,9 @@ class ExitCheckRequest(BaseModel):
 async def dashboard_home(request: Request):
     """Render the primary swing trading cockpit UI."""
     return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
+        request=request,
+        name="index.html",
+        context={
             "engine_title": "GANESHA V1",
             "version": "1.0.0 (Production)",
             "compliance_status": "SEBI Signal-Only Compliant",

@@ -37,7 +37,7 @@ NIFTY_100_CONSTITUENTS = [
     ("HCLTECH", "HCL Technologies Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
     ("WIPRO", "Wipro Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
     ("TECHM", "Tech Mahindra Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
-    ("LTIM", "LTIMindtree Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
+    ("LTM", "LTIMindtree Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
     ("PERSISTENT", "Persistent Systems Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
     ("COFORGE", "Coforge Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
     ("MPHASIS", "Mphasis Ltd.", "INFORMATION_TECHNOLOGY", "IT Services"),
@@ -52,7 +52,7 @@ NIFTY_100_CONSTITUENTS = [
     ("PETRONET", "Petronet LNG Ltd.", "OIL_AND_GAS", "Gas"),
 
     # ── Automobiles & Auto Components ──
-    ("TATAMOTORS", "Tata Motors Ltd.", "AUTOMOBILE", "Commercial & Passenger Vehicles"),
+    ("TMPV", "Tata Motors Ltd.", "AUTOMOBILE", "Commercial & Passenger Vehicles"),
     ("M&M", "Mahindra & Mahindra Ltd.", "AUTOMOBILE", "Passenger Vehicles & Tractors"),
     ("MARUTI", "Maruti Suzuki India Ltd.", "AUTOMOBILE", "Passenger Vehicles"),
     ("BAJAJ-AUTO", "Bajaj Auto Ltd.", "AUTOMOBILE", "2/3 Wheelers"),
@@ -61,7 +61,7 @@ NIFTY_100_CONSTITUENTS = [
     ("TVSMOTOR", "TVS Motor Company Ltd.", "AUTOMOBILE", "2 Wheelers"),
     ("BHARATFORG", "Bharat Forge Ltd.", "AUTOMOBILE", "Auto Components"),
     ("BOSCHLTD", "Bosch Ltd.", "AUTOMOBILE", "Auto Components"),
-    ("SAMVARDHANA", "Samvardhana Motherson Intl.", "AUTOMOBILE", "Auto Components"),
+    ("MOTHERSON", "Samvardhana Motherson Intl.", "AUTOMOBILE", "Auto Components"),
 
     # ── Fast Moving Consumer Goods (FMCG) ──
     ("ITC", "ITC Ltd.", "FMCG", "Diversified FMCG"),
@@ -120,9 +120,9 @@ NIFTY_100_CONSTITUENTS = [
     ("TITAN", "Titan Company Ltd.", "CONSUMER_SERVICES", "Gems, Jewellery & Watches"),
     ("TRENT", "Trent Ltd.", "CONSUMER_SERVICES", "Apparel Retail"),
     ("DMART", "Avenue Supermarts Ltd.", "CONSUMER_SERVICES", "Hypermarkets"),
-    ("ZOMATO", "Zomato Ltd.", "CONSUMER_SERVICES", "Food Delivery & Quick Commerce"),
+    ("ETERNAL", "Zomato Ltd.", "CONSUMER_SERVICES", "Food Delivery & Quick Commerce"),
     ("INDIGO", "InterGlobe Aviation Ltd.", "CONSUMER_SERVICES", "Airlines"),
-    ("INDIANHOTE", "The Indian Hotels Company", "CONSUMER_SERVICES", "Hotels"),
+    ("INDHOTEL", "The Indian Hotels Company", "CONSUMER_SERVICES", "Hotels"),
 
     # ── Cement & Construction Materials ──
     ("ULTRACEMCO", "UltraTech Cement Ltd.", "CEMENT", "Cement"),

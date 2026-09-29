@@ -33,7 +33,7 @@ COLUMN_ALIASES = {
     "symbol": {"SYMBOL", "SYMBOL_NAME", "TICKER", "TCKRSYMB"},
     "series": {"SERIES", "SERIES_CODE", "SCTYSRS"},
     "isin": {"ISIN", "ISIN_NUMBER"},
-    "company_name": {"NAME_OF_COMPANY", "COMPANY_NAME", "NAME", "FININSTRNM"},
+    "company_name": {"NAME_OF_COMPANY", "COMPANY_NAME", "NAME", "FININSTRMNM"},
     "security_description": {"FININSTRMNM", "SECURITY_DESCRIPTION", "SECURITY_DESC", "INSTRUMENT_NAME"},
     "status": {"STATUS", "SECURITY_STATUS", "SCTYSTSNRMLMKT"},
     "instrument_token": {"INSTRUMENT_TOKEN", "TOKEN", "FININSTRMID"},

@@ -300,20 +300,27 @@ def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[by
     response.raise_for_status()
 
     headers = getattr(response, "headers", {}) or {}
-    content_type = headers.get("Content-Type", "")
-    body_preview = getattr(response, "text", "")[:500]
-    if content_type and "json" not in content_type.lower():
-        raise ValueError(
-            "NSE reports API did not return JSON "
-            f"(status={getattr(response, 'status_code', 'unknown')}, "
-            f"content_type={content_type!r}, body={body_preview!r})"
-        )
+    content_type = str(headers.get("Content-Type", "")).lower()
 
+    # NSE may return the selected security-master archive directly from the
+    # reports endpoint instead of returning JSON metadata. In that case the
+    # response itself is the official .csv.gz payload.
+    if "gzip" in content_type or response.content[:2] == b"\x1f\x8b":
+        if not response.content:
+            raise ValueError(
+                f"NSE returned an empty security master for "
+                f"{snapshot_date:%Y-%m-%d}"
+            )
+        source_url = str(getattr(response, "url", "") or NSE_REPORTS_API_URL)
+        return response.content, source_url
+
+    body_preview = getattr(response, "text", "")[:500]
     try:
         payload = response.json()
     except ValueError as exc:
         raise ValueError(
-            "NSE reports API returned invalid JSON "
+            "NSE reports API returned neither a security-master gzip payload "
+            "nor valid JSON metadata "
             f"(status={getattr(response, 'status_code', 'unknown')}, "
             f"content_type={content_type!r}, body={body_preview!r})"
         ) from exc

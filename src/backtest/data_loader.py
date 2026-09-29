@@ -220,7 +220,7 @@ class HistoricalDataLoader:
                 valid_del = df_slice["delivery_volume"].dropna().tolist()
                 delivery_hist = [int(v) for v in valid_del if str(v).isdigit() or isinstance(v, (int, float))]
             
-            today_del = delivery_hist[-1] if delivery_hist else int(df_slice["volume"].iloc[-1] * 0.5)
+            # Missing delivery data must remain missing. Never synthesize a value\n            # because downstream screening treats delivery as a required gate.\n            today_del = delivery_hist[-1] if delivery_hist else None
 
             candidate_data[ticker] = {
                 "ohlcv": df_slice.copy(),

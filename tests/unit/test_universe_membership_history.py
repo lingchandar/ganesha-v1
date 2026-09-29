@@ -75,3 +75,34 @@ def test_unknown_ticker_is_not_considered_a_member():
     ])
 
     assert loader._is_member_on_date("NSE:BBB-EQ", date(2025, 1, 10)) is False
+
+
+
+def test_build_swing_universe_requires_membership_and_liquidity():
+    import pandas as pd
+    from src.ingestion.liquidity_filter import LiquidityConfig
+    from src.ingestion.universe_sync import build_swing_universe
+
+    membership = pd.DataFrame(
+        {
+            "ticker_symbol": ["NSE:AAA-EQ", "NSE:BBB-EQ"],
+            "instrument_token": [1, 2],
+        }
+    )
+    good = pd.DataFrame(
+        {
+            "date": pd.date_range("2026-07-01", periods=60),
+            "close_price": [100.0] * 60,
+            "volume_traded": [200_000] * 60,
+        }
+    )
+
+    result = build_swing_universe(
+        membership,
+        {"NSE:AAA-EQ": good},
+        LiquidityConfig(),
+    ).set_index("ticker_symbol")
+
+    assert bool(result.loc["NSE:AAA-EQ", "eligible"]) is True
+    assert bool(result.loc["NSE:BBB-EQ", "eligible"]) is False
+    assert result.loc["NSE:BBB-EQ", "reason"] == "MISSING_LIQUIDITY_HISTORY"

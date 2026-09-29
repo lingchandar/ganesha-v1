@@ -1,154 +1,95 @@
-"""
-GANESHA V1 — Universe Sync: Fetches and stores the active NIFTY 100 constituent list.
+"""Daily NSE universe synchronization.
 
-Runs on the 1st trading session of every month to refresh the eligible universe.
-Upserts into nse_eligible_universe table, marking removed stocks as inactive.
+The NSE CM-MII security master is the source of truth for the complete
+exchange universe. FYERS remains the live market-data provider and is not
+used to define which NSE securities exist.
 """
-from datetime import datetime, timezone
-from sqlalchemy import text
+from datetime import date
 from loguru import logger
+from sqlalchemy import text
 
 from src.core.database import get_db_session
-from src.ingestion.market_data_client import MarketDataClient
+from src.ingestion.nse_security_master import (
+    download_security_master,
+    parse_security_master_csv,
+    persist_current_security_master,
+    persist_security_snapshot,
+    save_raw_snapshot,
+    security_snapshot_hash,
+)
 
 
-def sync_nifty100_universe() -> int:
+def sync_nse_security_master(snapshot_date: date | None = None) -> int:
+    """Ingest one official NSE CM security-master snapshot.
+
+    No NIFTY index membership is used here. The complete NSE CM file is
+    retained first; swing/liquidity eligibility is a later stage.
     """
-    Fetch the latest NIFTY 50 + NIFTY NEXT 50 constituents
-    and upsert them into the nse_eligible_universe table.
+    snapshot_date = snapshot_date or date.today()
+    logger.info("Starting complete NSE security-master sync for {}", snapshot_date)
 
-    Returns:
-        Number of stocks synced.
+    raw, source_file = download_security_master(snapshot_date)
+    source_sha256 = security_snapshot_hash(raw)
+    parsed = parse_security_master_csv(raw)
+
+    with get_db_session() as db:
+        save_raw_snapshot(raw, snapshot_date, "data/nse_security_master")
+        persist_current_security_master(
+            db,
+            snapshot_date,
+            parsed,
+            source="NSE_CM_MII_SECURITY",
+            source_file=source_file,
+            source_sha256=source_sha256,
+        )
+        # Store every CM row as evidence. Do not silently reduce this to NIFTY.
+        persist_security_snapshot(
+            db,
+            snapshot_date,
+            parsed,
+            source="NSE_CM_MII_SECURITY",
+            source_file=source_file,
+            source_sha256=source_sha256,
+            universe_name="NSE_LISTED_CM",
+        )
+
+    logger.success(
+        "NSE security-master sync complete: {} CM securities stored", len(parsed)
+    )
+    return len(parsed)
+
+
+def sync_nse_equity_universe(snapshot_date: date | None = None) -> int:
+    """Ingest only EQ-series securities for the stock universe.
+
+    This is a separate resolver from the raw CM master so future eligibility
+    rules can exclude ETFs, debt, SME, suspended/illiquid names, etc. without
+    losing the raw exchange evidence.
     """
-    logger.info("Starting NIFTY 100 universe sync...")
+    snapshot_date = snapshot_date or date.today()
+    raw, source_file = download_security_master(snapshot_date)
+    source_sha256 = security_snapshot_hash(raw)
+    parsed = parse_security_master_csv(raw)
 
-    client = MarketDataClient()
-    synced_count = 0
-    sync_date = datetime.now(timezone.utc).date()
+    from src.ingestion.nse_security_master import filter_equity_series
+    equity = filter_equity_series(parsed)
 
-    try:
-        client.authenticate()
-        symbols = client.fetch_nifty100_symbols()
-        logger.info(f"Fetched {len(symbols)} symbols from broker API")
+    with get_db_session() as db:
+        persist_security_snapshot(
+            db,
+            snapshot_date,
+            equity,
+            source="NSE_CM_MII_SECURITY",
+            source_file=source_file,
+            source_sha256=source_sha256,
+            universe_name="NSE_LISTED_EQUITY",
+        )
 
-        with get_db_session() as db:
-            # Historical membership is recorded separately from the mutable live master.
-            existing = db.execute(text("""
-                SELECT ticker_symbol, instrument_token
-                FROM universe_membership_history
-                WHERE universe_name = 'NSE_SWING' AND effective_to IS NULL
-            """)).mappings().all()
-            existing_symbols = {row["ticker_symbol"]: row["instrument_token"] for row in existing}
-            incoming_symbols = {sym["symbol"]: sym["token"] for sym in symbols}
-
-            # Close memberships that disappeared from the latest universe snapshot.
-            for ticker in existing_symbols.keys() - incoming_symbols.keys():
-                db.execute(text("""
-                    UPDATE universe_membership_history
-                    SET effective_to = :effective_to
-                    WHERE universe_name = 'NSE_SWING'
-                      AND ticker_symbol = :ticker
-                      AND effective_to IS NULL
-                """), {"ticker": ticker, "effective_to": sync_date})
-
-            # Step 1: Mark ALL existing stocks as inactive
-            db.execute(
-                text("UPDATE nse_eligible_universe SET is_active_swing = FALSE")
-            )
-
-            # Step 2: Upsert each fetched symbol (re-activating current constituents)
-            for sym in symbols:
-                db.execute(
-                    text("""
-                        INSERT INTO nse_eligible_universe
-                            (instrument_token, ticker_symbol, company_name,
-                             sector_name, industry_name, is_active_swing, last_updated_at)
-                        VALUES
-                            (:token, :ticker, :name, :sector, :industry, TRUE, :now)
-                        ON CONFLICT (ticker_symbol)
-                        DO UPDATE SET
-                            instrument_token = EXCLUDED.instrument_token,
-                            sector_name = EXCLUDED.sector_name,
-                            industry_name = EXCLUDED.industry_name,
-                            is_active_swing = TRUE,
-                            last_updated_at = EXCLUDED.last_updated_at
-                    """),
-                    {
-                        "token": sym["token"],
-                        "ticker": sym["symbol"],
-                        "name": sym["name"],
-                        "sector": sym["sector"],
-                        "industry": sym.get("industry", ""),
-                        "now": datetime.now(timezone.utc),
-                    },
-                )
-                # Preserve classification history instead of relying on the mutable master row.
-                membership = db.execute(text("""
-                    SELECT instrument_token
-                    FROM universe_membership_history
-                    WHERE universe_name = 'NSE_SWING'
-                      AND ticker_symbol = :ticker
-                      AND effective_to IS NULL
-                    ORDER BY effective_from DESC
-                    LIMIT 1
-                """), {"ticker": sym["symbol"]}).mappings().first()
-                if membership is None:
-                    db.execute(text("""
-                        INSERT INTO universe_membership_history
-                            (universe_name, ticker_symbol, instrument_token, effective_from)
-                        VALUES ('NSE_SWING', :ticker, :token, :effective_from)
-                    """), {"ticker": sym["symbol"], "token": sym["token"], "effective_from": sync_date})
-                elif int(membership["instrument_token"]) != int(sym["token"]):
-                    db.execute(text("""
-                        UPDATE universe_membership_history
-                        SET effective_to = :effective_from
-                        WHERE universe_name = 'NSE_SWING'
-                          AND ticker_symbol = :ticker
-                          AND effective_to IS NULL
-                    """), {"ticker": sym["symbol"], "effective_from": sync_date})
-                    db.execute(text("""
-                        INSERT INTO universe_membership_history
-                            (universe_name, ticker_symbol, instrument_token, effective_from)
-                        VALUES ('NSE_SWING', :ticker, :token, :effective_from)
-                    """), {"ticker": sym["symbol"], "token": sym["token"], "effective_from": sync_date})
-                previous = db.execute(text("""
-                    SELECT sector_name, industry_name
-                    FROM universe_sector_history
-                    WHERE ticker_symbol = :ticker AND effective_to IS NULL
-                    ORDER BY effective_from DESC LIMIT 1
-                """), {"ticker": sym["symbol"]}).mappings().first()
-                if previous is None:
-                    db.execute(text("""
-                        INSERT INTO universe_sector_history
-                            (ticker_symbol, sector_name, industry_name, effective_from)
-                        VALUES (:ticker, :sector, :industry, :effective_from)
-                    """), {"ticker": sym["symbol"], "sector": sym["sector"],
-                           "industry": sym.get("industry", ""), "effective_from": sync_date})
-                elif previous["sector_name"] != sym["sector"] or previous["industry_name"] != sym.get("industry", ""):
-                    db.execute(text("""
-                        UPDATE universe_sector_history SET effective_to = :effective_from
-                        WHERE ticker_symbol = :ticker AND effective_to IS NULL
-                    """), {"ticker": sym["symbol"], "effective_from": sync_date})
-                    db.execute(text("""
-                        INSERT INTO universe_sector_history
-                            (ticker_symbol, sector_name, industry_name, effective_from)
-                        VALUES (:ticker, :sector, :industry, :effective_from)
-                    """), {"ticker": sym["symbol"], "sector": sym["sector"],
-                           "industry": sym.get("industry", ""), "effective_from": sync_date})
-                synced_count += 1
-
-        logger.success(f"Universe sync complete: {synced_count} stocks active")
-
-    except NotImplementedError as e:
-        logger.warning(f"Universe sync skipped (broker auth not implemented): {e}")
-    except Exception as e:
-        logger.error(f"Universe sync FAILED: {e}")
-        raise
-    finally:
-        client.close()
-
-    return synced_count
+    logger.success(
+        "NSE EQ universe snapshot complete: {} equity-series securities", len(equity)
+    )
+    return len(equity)
 
 
 if __name__ == "__main__":
-    sync_nifty100_universe()
+    sync_nse_security_master()

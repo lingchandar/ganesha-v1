@@ -62,6 +62,32 @@ def sync_nifty100_universe() -> int:
                         "now": datetime.now(),
                     },
                 )
+                # Preserve classification history instead of relying on the mutable master row.
+                sync_date = datetime.now().date()
+                previous = db.execute(text("""
+                    SELECT sector_name, industry_name
+                    FROM universe_sector_history
+                    WHERE ticker_symbol = :ticker AND effective_to IS NULL
+                    ORDER BY effective_from DESC LIMIT 1
+                """), {"ticker": sym["symbol"]}).mappings().first()
+                if previous is None:
+                    db.execute(text("""
+                        INSERT INTO universe_sector_history
+                            (ticker_symbol, sector_name, industry_name, effective_from)
+                        VALUES (:ticker, :sector, :industry, :effective_from)
+                    """), {"ticker": sym["symbol"], "sector": sym["sector"],
+                           "industry": sym.get("industry", ""), "effective_from": sync_date})
+                elif previous["sector_name"] != sym["sector"] or previous["industry_name"] != sym.get("industry", ""):
+                    db.execute(text("""
+                        UPDATE universe_sector_history SET effective_to = :effective_from
+                        WHERE ticker_symbol = :ticker AND effective_to IS NULL
+                    """), {"ticker": sym["symbol"], "effective_from": sync_date})
+                    db.execute(text("""
+                        INSERT INTO universe_sector_history
+                            (ticker_symbol, sector_name, industry_name, effective_from)
+                        VALUES (:ticker, :sector, :industry, :effective_from)
+                    """), {"ticker": sym["symbol"], "sector": sym["sector"],
+                           "industry": sym.get("industry", ""), "effective_from": sync_date})
                 synced_count += 1
 
         logger.success(f"Universe sync complete: {synced_count} stocks active")

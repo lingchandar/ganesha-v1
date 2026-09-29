@@ -64,9 +64,15 @@ def backfill_all(years: int = 3) -> None:
 
     with get_db_session() as db:
         universe = db.execute(text(
-            "SELECT ticker_symbol, instrument_token FROM nse_eligible_universe "
-            "WHERE is_active_swing = TRUE ORDER BY instrument_token"
-        )).fetchall()
+            """
+            SELECT ticker_symbol, instrument_token
+            FROM universe_membership_history
+            WHERE universe_name = 'NSE_SWING'
+              AND effective_from <= :end_date
+              AND (effective_to IS NULL OR effective_to > :end_date)
+            ORDER BY instrument_token
+            """
+        ), {"end_date": date.today()}).fetchall()
 
     end = date.today()
     start = end - timedelta(days=years * 365)

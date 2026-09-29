@@ -98,7 +98,7 @@ def parse_security_master_csv(raw: bytes) -> pd.DataFrame:
     rename = {source: logical for logical, source in mapping.items()}
     df = df.rename(columns=rename)
 
-    for column in ("isin", "company_name", "status", "instrument_token"):
+    for column in ("isin", "company_name", "security_description", "status", "instrument_token"):
         if column not in df.columns:
             df[column] = None
 
@@ -353,13 +353,41 @@ def security_snapshot_hash(raw: bytes) -> str:
 
 def filter_equity_series(
     df: pd.DataFrame,
-    allowed_series: tuple[str, ...] = ("EQ",),
+    allowed_series: tuple[str, ...] = ("EQ", "BE", "BZ", "SM", "ST", "SZ"),
 ) -> pd.DataFrame:
-    """Return equity-series rows; no liquidity/swing filter is applied here."""
+    """Return listed equity shares suitable for the stock universe.
+
+    NSE uses EQ/BE/BZ for fully paid equity and SM/ST/SZ for SME equity.
+    BE is also used for Rights Entitlements, so those are excluded using
+    NSE's ``-RE`` symbol convention and the security description when present.
+    ETFs are excluded from the stock universe using the official security
+    description. This function does not apply liquidity or swing filters.
+    """
+    required = {"symbol", "series"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Equity filter frame missing columns: {sorted(missing)}")
+
     allowed = {value.upper() for value in allowed_series}
-    return df[df["series"].isin(allowed)].copy()
+    result = df[df["series"].fillna("").astype(str).str.upper().isin(allowed)].copy()
 
+    symbol = result["symbol"].fillna("").astype(str).str.strip().str.upper()
+    result = result[~symbol.str.endswith("NSETEST")]
 
+    description = result.get(
+        "security_description",
+        pd.Series("", index=result.index, dtype="object"),
+    ).fillna("").astype(str).str.upper()
+
+    is_rights_entitlement = symbol.str.endswith("-RE") | description.str.contains(
+        r"RIGHTS?\s+ENTITLEMENT", regex=True, na=False
+    )
+    result = result[~is_rights_entitlement]
+
+    is_etf = description.str.contains(
+        r"\bETF\b|EXCHANGE[- ]TRADED\s+FUND", regex=True, na=False
+    )
+    return result[~is_etf].copy()
 def save_raw_snapshot(raw: bytes, snapshot_date: date, directory: str | Path) -> Path:
     path = Path(directory) / f"NSE_CM_security_{snapshot_date:%Y%m%d}.csv.gz"
     path.parent.mkdir(parents=True, exist_ok=True)

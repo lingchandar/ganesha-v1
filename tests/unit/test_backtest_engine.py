@@ -96,7 +96,7 @@ def test_candle_validation_accepts_missing_delivery_data():
     [
         (lambda df: df.assign(volume=[1000, -1]), "volume cannot be negative"),
         (lambda df: df.assign(high=[105.0, 99.0]), "high must be"),
-        (lambda df: df.assign(low=[99.0, 107.0]), "low must be"),
+        (lambda df: df.assign(low=[99.0, 105.0]), "low must be"),
         (lambda df: df.assign(close=[103.0, np.nan]), "non-finite"),
         (lambda df: df.assign(delivery_percentage=[60.0, 101.0]), "delivery_percentage"),
     ],

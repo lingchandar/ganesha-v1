@@ -81,6 +81,26 @@ def validate_trade_dates(df: pd.DataFrame, symbol: str = "UNKNOWN") -> None:
         raise ValueError(f"{symbol}: duplicate trading dates found")
 
 
+def validate_sector_series(series: pd.Series, sector: str = "UNKNOWN") -> None:
+    """Validate a historical sector composite before backtest use."""
+    if series.empty:
+        raise ValueError(f"{sector}: sector series is empty")
+
+    dates = pd.to_datetime(pd.Series(series.index), errors="coerce")
+    if dates.isna().any():
+        raise ValueError(f"{sector}: invalid sector series dates found")
+    if not dates.is_monotonic_increasing:
+        raise ValueError(f"{sector}: sector series dates must be sorted ascending")
+    if dates.duplicated().any():
+        raise ValueError(f"{sector}: duplicate sector series dates found")
+
+    values = pd.to_numeric(series, errors="coerce")
+    if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+        raise ValueError(f"{sector}: sector series contains non-finite values")
+    if (values <= 0).any():
+        raise ValueError(f"{sector}: sector series values must be positive")
+
+
 def validate_benchmark_frame(
     df: pd.DataFrame,
     symbol: str = "NIFTY50",
@@ -281,7 +301,9 @@ class HistoricalDataLoader:
             series_list = [self.stock_candles[t]["close"] for t in tickers if t in self.stock_candles]
             if series_list:
                 sector_df = pd.concat(series_list, axis=1)
-                self.sector_series[sector] = sector_df.mean(axis=1).sort_index()
+                composite = sector_df.mean(axis=1).sort_index()
+                validate_sector_series(composite, sector=sector)
+                self.sector_series[sector] = composite
 
     def get_point_in_time_slice(
         self,

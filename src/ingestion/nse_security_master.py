@@ -63,13 +63,29 @@ def _normalise_columns(columns: Iterable[str]) -> dict[str, str]:
     return mapping
 
 
+def _read_delimited_payload(payload: bytes) -> pd.DataFrame:
+    """Read NSE security-master payloads with comma/pipe delimiter detection."""
+    sample = payload[:65536].decode("utf-8-sig", errors="replace")
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",|;\\t")
+        delimiter = dialect.delimiter
+    except csv.Error:
+        delimiter = "|" if "|" in sample.splitlines()[0] else ","
+    return pd.read_csv(
+        io.BytesIO(payload),
+        dtype=str,
+        sep=delimiter,
+        engine="python",
+    )
+
+
 def parse_security_master_csv(raw: bytes) -> pd.DataFrame:
-    """Parse gzip-compressed or plain CSV security-master bytes."""
+    """Parse gzip-compressed or plain NSE security-master bytes."""
     payload = raw
     if raw[:2] == b"\x1f\x8b":
         payload = gzip.decompress(raw)
 
-    df = pd.read_csv(io.BytesIO(payload), dtype=str)
+    df = _read_delimited_payload(payload)
     mapping = _normalise_columns(df.columns)
     missing = {"symbol", "series"} - mapping.keys()
     if missing:

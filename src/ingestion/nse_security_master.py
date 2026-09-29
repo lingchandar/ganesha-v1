@@ -121,7 +121,10 @@ def parse_security_master_csv(raw: bytes) -> pd.DataFrame:
             df["instrument_token"], errors="coerce"
         ).astype("Int64")
 
-    for column in ("isin", "company_name", "status"):
+    if df["company_name"].isna().all() and df["security_description"].notna().any():
+        df["company_name"] = df["security_description"]
+
+    for column in ("isin", "company_name", "security_description", "status"):
         df[column] = df[column].where(df[column].notna(), None)
 
     return df
@@ -388,7 +391,7 @@ def filter_equity_series(
     is_etf = description.str.contains(
         r"\bETF\b|EXCHANGE[- ]TRADED\s+FUND", regex=True, na=False
     )
-    return result[~is_etf].copy()
+    return result.loc[~is_etf].copy()
 def save_raw_snapshot(raw: bytes, snapshot_date: date, directory: str | Path) -> Path:
     path = Path(directory) / f"NSE_CM_security_{snapshot_date:%Y%m%d}.csv.gz"
     path.parent.mkdir(parents=True, exist_ok=True)

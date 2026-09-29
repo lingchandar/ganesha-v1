@@ -300,17 +300,42 @@ class HistoricalDataLoader:
         Computes composite sector index series by averaging daily close prices
         of constituent stocks in each sector.
         """
-        sector_stock_map: Dict[str, List[str]] = {}
-        for ticker, sector in self.ticker_sectors.items():
-            if ticker in self.stock_candles:
-                sector_stock_map.setdefault(sector, []).append(ticker)
-
+        # Build the composite separately for each historical date so that
+        # sector membership is point-in-time. Using today's ticker_sectors
+        # here would leak current constituents into historical backtests.
         self.sector_series = {}
-        for sector, tickers in sector_stock_map.items():
-            series_list = [self.stock_candles[t]["close"] for t in tickers if t in self.stock_candles]
-            if series_list:
-                sector_df = pd.concat(series_list, axis=1)
-                composite = sector_df.mean(axis=1).sort_index()
+        if self.sector_history_df.empty:
+            raise RuntimeError("Point-in-time sector history is required to build sector series")
+
+        history = self.sector_history_df.copy()
+        history["effective_from"] = pd.to_datetime(history["effective_from"], errors="coerce")
+        history["effective_to"] = pd.to_datetime(history["effective_to"], errors="coerce")
+
+        all_dates = sorted(
+            set().union(*(df.index for df in self.stock_candles.values()))
+        )
+        for sector in history["sector_name"].dropna().unique():
+            values = {}
+            sector_rows = history[history["sector_name"] == sector]
+
+            for trade_date in all_dates:
+                ts = pd.Timestamp(trade_date)
+                valid_rows = sector_rows[
+                    (sector_rows["effective_from"] <= ts)
+                    & (sector_rows["effective_to"].isna() | (sector_rows["effective_to"] > ts))
+                ]
+                tickers = [
+                    ticker for ticker in valid_rows["ticker_symbol"].tolist()
+                    if ticker in self.stock_candles and trade_date in self.stock_candles[ticker].index
+                ]
+                if not tickers:
+                    continue
+
+                closes = [float(self.stock_candles[ticker].loc[trade_date, "close"]) for ticker in tickers]
+                values[trade_date] = float(np.mean(closes))
+
+            if values:
+                composite = pd.Series(values).sort_index()
                 validate_sector_series(composite, sector=sector)
                 self.sector_series[sector] = composite
 

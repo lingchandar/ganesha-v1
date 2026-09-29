@@ -378,17 +378,18 @@ class HistoricalDataLoader:
         """Return the sector classification valid on a historical scan date."""
         if self.sector_history_df.empty:
             raise RuntimeError("Point-in-time sector history is empty")
+        # Keep the entire comparison in pandas Timestamp space. Mixing
+        # datetime64/NaT with Python date values can raise InvalidComparison.
+        as_of_timestamp = pd.Timestamp(as_of_date)
         effective_from = pd.to_datetime(
             self.sector_history_df["effective_from"], errors="coerce"
-        ).dt.date
+        )
         effective_to = pd.to_datetime(
             self.sector_history_df["effective_to"], errors="coerce"
-        ).dt.date
+        )
 
-        # Build the open-ended interval mask separately. Pandas comparisons
-        # against NaT can raise before the boolean OR is applied.
-        valid_from = effective_from <= as_of_date
-        valid_to = effective_to.isna() | (effective_to > as_of_date)
+        valid_from = effective_from <= as_of_timestamp
+        valid_to = effective_to.isna() | (effective_to > as_of_timestamp)
 
         rows = self.sector_history_df[
             (self.sector_history_df["ticker_symbol"] == ticker)

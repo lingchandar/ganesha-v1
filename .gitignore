@@ -1,6 +1,7 @@
 # Secrets
 config/.env
 *.env
+config/fyers_token.json
 
 # Python
 __pycache__/

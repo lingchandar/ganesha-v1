@@ -34,6 +34,20 @@ def test_parses_gzipped_security_master_and_preserves_series():
     assert df.loc[df["symbol"] == "AAA", "company_name"].iloc[0] == "Alpha Ltd"
 
 
+def test_parses_pipe_delimited_master():
+    raw = (
+        "SYMBOL|SERIES|ISIN|NAME OF COMPANY|TOKEN\n"
+        "AAA|EQ|INE000000001|Alpha Ltd|12345\n"
+        "BBB|BE|INE000000002|Beta Ltd|12346\n"
+    ).encode()
+
+    df = parse_security_master_csv(raw)
+
+    assert df["symbol"].tolist() == ["AAA", "BBB"]
+    assert df["series"].tolist() == ["EQ", "BE"]
+    assert int(df.loc[df["symbol"] == "AAA", "instrument_token"].iloc[0]) == 12345
+
+
 def test_rejects_master_without_symbol_and_series():
     with pytest.raises(ValueError, match="missing required columns"):
         parse_security_master_csv(b"ISIN,NAME\nINE1,Alpha\n")
@@ -45,6 +59,13 @@ def test_equity_filter_is_separate_from_ingestion():
     )
     result = filter_equity_series(df)
     assert result["symbol"].tolist() == ["AAA", "BBB"]
+
+
+def test_to_fyers_equity_symbol():
+    from src.ingestion.nse_security_master import to_fyers_equity_symbol
+
+    assert to_fyers_equity_symbol("RELIANCE") == "NSE:RELIANCE-EQ"
+    assert to_fyers_equity_symbol("NSE:TCS-EQ") == "NSE:TCS-EQ"
 
 
 def test_snapshot_hash_is_stable():

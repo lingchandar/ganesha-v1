@@ -77,11 +77,19 @@ def test_download_warms_nse_reports_session(monkeypatch):
     from src.ingestion import nse_security_master as module
 
     class FakeResponse:
-        def __init__(self, content=b"data"):
-            self.content = content
+        content = b"landing"
 
         def raise_for_status(self):
             return None
+
+        def json(self):
+            return {
+                "data": [{
+                    "displayName": module.NSE_SECURITY_REPORT_NAME,
+                    "fileActlName": "NSE_CM_security_25092026.csv.gz",
+                    "filePath": "https://nsearchives.nseindia.com/content/equities/",
+                }]
+            }
 
     class FakeSession:
         def __init__(self):
@@ -96,42 +104,34 @@ def test_download_warms_nse_reports_session(monkeypatch):
 
     raw, url = module.download_security_master(date(2026, 9, 25))
 
-    assert raw == b"data"
-    assert url.endswith("NSE_CM_security_25092026.csv.gz")
+    assert raw == b"landing"
     assert fake.calls[0][0] == module.NSE_REPORTS_URL
-    assert fake.calls[1][0] == url
-    assert fake.calls[1][1]["headers"]["Referer"] == module.NSE_REPORTS_URL
+    assert fake.calls[1][0] == module.NSE_REPORTS_API_URL
+    assert fake.calls[2][0] == url
 
 
-def test_download_preserves_nse_archive_error_after_session_warmup(monkeypatch):
+
+def test_download_raises_when_reports_api_has_no_security_master(monkeypatch):
     from src.ingestion import nse_security_master as module
 
     class FakeResponse:
-        content = b""
+        content = b"landing"
 
         def raise_for_status(self):
-            raise module.requests.HTTPError("404")
+            return None
+
+        def json(self):
+            return {"data": []}
 
     class FakeSession:
-        def __init__(self):
-            self.calls = []
-
         def get(self, url, **kwargs):
-            self.calls.append(url)
-            return FakeResponse() if url != module.NSE_REPORTS_URL else type(
-                "WarmResponse", (), {"content": b"reports"}
-            )()
+            return FakeResponse()
 
-    fake = FakeSession()
-    monkeypatch.setattr(module, "_nse_session", lambda: fake)
+    monkeypatch.setattr(module, "_nse_session", lambda: FakeSession())
 
-    with pytest.raises(module.requests.HTTPError):
+    with pytest.raises(FileNotFoundError):
         module.download_security_master(date(2026, 9, 25))
 
-    assert fake.calls == [
-        module.NSE_REPORTS_URL,
-        module.build_security_master_url(date(2026, 9, 25)),
-    ]
 
 
 def test_find_report_file_matches_requested_security_master():

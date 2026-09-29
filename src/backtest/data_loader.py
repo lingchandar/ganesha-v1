@@ -18,6 +18,52 @@ from loguru import logger
 from src.core.database import get_db_session
 
 
+def validate_candle_frame(df: pd.DataFrame, symbol: str = "UNKNOWN") -> None:
+    """
+    Validate historical daily OHLCV integrity before it enters a backtest.
+
+    Delivery fields are optional: missing delivery data is allowed and must be
+    handled by the strategy gates. Core OHLCV data is not optional.
+    """
+    required = {"trade_date", "open", "high", "low", "close", "volume"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{symbol}: missing required candle columns: {sorted(missing)}")
+
+    if df["trade_date"].duplicated().any():
+        duplicates = df.loc[df["trade_date"].duplicated(), "trade_date"].tolist()
+        raise ValueError(f"{symbol}: duplicate trading dates found: {duplicates[:5]}")
+
+    numeric_columns = ["open", "high", "low", "close", "volume"]
+    for column in numeric_columns:
+        values = pd.to_numeric(df[column], errors="coerce")
+        if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+            raise ValueError(f"{symbol}: non-finite or non-numeric values in {column}")
+
+    if (df["open"] <= 0).any() or (df["high"] <= 0).any() or (df["low"] <= 0).any() or (df["close"] <= 0).any():
+        raise ValueError(f"{symbol}: OHLC prices must be positive")
+
+    if (df["volume"] < 0).any():
+        raise ValueError(f"{symbol}: volume cannot be negative")
+
+    if (df["high"] < df[["open", "close", "low"]].max(axis=1)).any():
+        raise ValueError(f"{symbol}: high must be >= open, close, and low")
+
+    if (df["low"] > df[["open", "close", "high"]].min(axis=1)).any():
+        raise ValueError(f"{symbol}: low must be <= open, close, and high")
+
+    if "delivery_volume" in df.columns:
+        delivery = pd.to_numeric(df["delivery_volume"], errors="coerce")
+        if ((delivery < 0) & delivery.notna()).any():
+            raise ValueError(f"{symbol}: delivery_volume cannot be negative")
+
+    if "delivery_percentage" in df.columns:
+        delivery_pct = pd.to_numeric(df["delivery_percentage"], errors="coerce")
+        invalid_pct = delivery_pct.notna() & ((delivery_pct < 0) | (delivery_pct > 100))
+        if invalid_pct.any():
+            raise ValueError(f"{symbol}: delivery_percentage must be between 0 and 100")
+
+
 class HistoricalDataLoader:
     """
     Manages historical market data for all Nifty 100 constituent equities,
@@ -106,6 +152,7 @@ class HistoricalDataLoader:
                 },
                 inplace=True,
             )
+            validate_candle_frame(df_t, symbol=ticker)
             df_t.set_index("trade_date", inplace=True)
             self.stock_candles[ticker] = df_t
 
@@ -149,6 +196,10 @@ class HistoricalDataLoader:
                 df_bench = df_bench[df_bench.index >= start_date]
             if end_date:
                 df_bench = df_bench[df_bench.index <= end_date]
+            validate_candle_frame(
+                df_bench.reset_index().rename(columns={"trade_date": "trade_date"}),
+                symbol="NIFTY50",
+            )
             self.nifty_benchmark_df = df_bench
         else:
             # Fallback composite benchmark: equal-weighted close of all stocks

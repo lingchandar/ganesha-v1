@@ -33,6 +33,23 @@ CREATE TABLE IF NOT EXISTS universe_sector_history (
 CREATE INDEX IF NOT EXISTS idx_sector_history_lookup
 ON universe_sector_history (ticker_symbol, effective_from, effective_to);
 
+-- 3. Point-in-Time Universe Membership History
+-- Half-open validity interval: [effective_from, effective_to).
+CREATE TABLE IF NOT EXISTS universe_membership_history (
+    id BIGSERIAL PRIMARY KEY,
+    universe_name VARCHAR(50) NOT NULL DEFAULT 'NSE_SWING',
+    ticker_symbol VARCHAR(25) NOT NULL,
+    instrument_token BIGINT NOT NULL,
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    source_updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT valid_membership_history_range CHECK (effective_to IS NULL OR effective_to > effective_from),
+    CONSTRAINT unique_membership_history_start UNIQUE (universe_name, ticker_symbol, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_membership_history_lookup
+ON universe_membership_history (universe_name, ticker_symbol, effective_from, effective_to);
+
 -- 2. Point-in-Time Historical Daily OHLCV & Delivery Data
 CREATE TABLE IF NOT EXISTS historical_daily_candles (
     id BIGSERIAL PRIMARY KEY,

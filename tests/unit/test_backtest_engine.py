@@ -75,6 +75,18 @@ class MockDataLoader(HistoricalDataLoader):
             })
         self.sector_history_df = pd.DataFrame(rows)
 
+        # Mock point-in-time universe membership for the in-memory loader.
+        membership_rows = []
+        for ticker in stock_dict:
+            membership_rows.append({
+                "universe_name": "NSE_SWING",
+                "ticker_symbol": ticker,
+                "instrument_token": 1,
+                "effective_from": min(stock_dict[ticker].index),
+                "effective_to": None,
+            })
+        self.membership_history_df = pd.DataFrame(membership_rows)
+
         all_dates = set()
         for df in stock_dict.values():
             all_dates.update(df.index)

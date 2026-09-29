@@ -16,6 +16,23 @@ CREATE TABLE IF NOT EXISTS nse_eligible_universe (
     last_updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 2. Point-in-Time Sector Classification History
+-- Half-open validity interval: [effective_from, effective_to).
+CREATE TABLE IF NOT EXISTS universe_sector_history (
+    id BIGSERIAL PRIMARY KEY,
+    ticker_symbol VARCHAR(25) NOT NULL,
+    sector_name VARCHAR(75) NOT NULL,
+    industry_name VARCHAR(100),
+    effective_from DATE NOT NULL,
+    effective_to DATE,
+    source_updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT valid_sector_history_range CHECK (effective_to IS NULL OR effective_to > effective_from),
+    CONSTRAINT unique_sector_history_start UNIQUE (ticker_symbol, effective_from)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sector_history_lookup
+ON universe_sector_history (ticker_symbol, effective_from, effective_to);
+
 -- 2. Point-in-Time Historical Daily OHLCV & Delivery Data
 CREATE TABLE IF NOT EXISTS historical_daily_candles (
     id BIGSERIAL PRIMARY KEY,

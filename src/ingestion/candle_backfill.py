@@ -37,7 +37,10 @@ INSERT_SQL = text("""
 
 
 def fetch_symbol(client: MarketDataClient, symbol: str, start: date, end: date) -> List[dict]:
-    """Fetch daily candles for one symbol, in <=360-day chunks."""
+    """Fetch daily candles using the stored FYERS exchange symbol."""
+    if not symbol.startswith("NSE:") or not symbol.endswith("-EQ"):
+        raise ValueError(f"Invalid FYERS equity symbol: {symbol!r}")
+
     rows, cur = [], start
     while cur < end:
         chunk_end = min(cur + timedelta(days=CHUNK_DAYS), end)
@@ -79,23 +82,26 @@ def backfill_all(years: int = 3) -> None:
     total, ok, failed = 0, 0, []
     logger.info(f"Backfilling {len(universe)} tickers from Fyers ({start} to {end})")
 
-    for i, (symbol, token) in enumerate(universe, 1):
+    for i, (fyers_symbol, nse_security_token) in enumerate(universe, 1):
         try:
-            rows = fetch_symbol(client, symbol, start, end)
+            # ticker_symbol is the FYERS symbol (NSE:SYMBOL-EQ).
+            # instrument_token remains the NSE CM security ID and is used only
+            # as Ganesha's internal historical-candle key; it is NOT sent to FYERS.
+            rows = fetch_symbol(client, fyers_symbol, start, end)
             if not rows:
-                failed.append(symbol)
-                logger.warning(f"[{i}/{len(universe)}] {symbol}: no candles returned")
+                failed.append(fyers_symbol)
+                logger.warning(f"[{i}/{len(universe)}] {fyers_symbol}: no candles returned")
                 continue
             for r in rows:
-                r["token"] = token
+                r["token"] = nse_security_token
             with get_db_session() as db:
                 db.execute(INSERT_SQL, rows)
             total += len(rows)
             ok += 1
-            logger.info(f"[{i}/{len(universe)}] {symbol}: {len(rows)} candles")
+            logger.info(f"[{i}/{len(universe)}] {fyers_symbol}: {len(rows)} candles")
         except Exception as e:
-            failed.append(symbol)
-            logger.error(f"[{i}/{len(universe)}] {symbol} failed: {e}")
+            failed.append(fyers_symbol)
+            logger.error(f"[{i}/{len(universe)}] {fyers_symbol} failed: {e}")
 
     client.close()
     logger.success(f"Done: {ok}/{len(universe)} tickers, {total} candles stored.")
@@ -145,4 +151,3 @@ def main(argv: List[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-    

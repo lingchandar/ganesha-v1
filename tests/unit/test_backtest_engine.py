@@ -100,6 +100,34 @@ def test_zero_lookahead_data_slicing(mock_candles_df):
     assert date(2025, 1, 26) not in stock_slice.index
 
 
+def test_zero_lookahead_excludes_future_delivery_data(mock_candles_df):
+    """Delivery history and today's delivery must only use rows up to the cutoff."""
+    stocks = {"NSE:TEST-EQ": mock_candles_df.copy()}
+    stocks["NSE:TEST-EQ"].loc[date(2025, 1, 26), "delivery_volume"] = 999_999
+    loader = MockDataLoader(stocks, {"NSE:TEST-EQ": "FINANCIAL_SERVICES"})
+
+    cutoff_date = date(2025, 1, 25)
+    _, candidates = loader.get_point_in_time_slice(as_of_date=cutoff_date, min_bars_required=10)
+    candidate = candidates["NSE:TEST-EQ"]
+
+    assert candidate["ohlcv"].index.max() <= cutoff_date
+    assert 999_999 not in candidate["delivery_history"]
+    assert candidate["today_delivery"] == 60_000
+
+
+def test_missing_delivery_data_is_not_synthesized(mock_candles_df):
+    """Missing delivery data must not be replaced with a fabricated percentage."""
+    stocks = {"NSE:TEST-EQ": mock_candles_df.copy()}
+    stocks["NSE:TEST-EQ"]["delivery_volume"] = np.nan
+    loader = MockDataLoader(stocks, {"NSE:TEST-EQ": "FINANCIAL_SERVICES"})
+
+    _, candidates = loader.get_point_in_time_slice(as_of_date=date(2025, 1, 25), min_bars_required=10)
+    candidate = candidates["NSE:TEST-EQ"]
+
+    assert candidate["delivery_history"] == []
+    assert candidate["today_delivery"] is None
+
+
 def test_pending_order_limit_fill_when_price_reached():
     """Verify limit order fills when day's range covers entry price."""
     engine = BacktestEngine(config=BacktestConfig(initial_capital_inr=100_000.0))

@@ -117,3 +117,15 @@ def test_candle_backfill_uses_point_in_time_membership():
     assert "effective_from <= :end_date" in source
     assert "(effective_to IS NULL OR effective_to > :end_date)" in source
     assert "FROM nse_eligible_universe" not in source
+
+
+def test_candle_backfill_uses_fyers_symbol_not_nse_token():
+    from pathlib import Path
+
+    source = Path("src/ingestion/candle_backfill.py").read_text()
+    assert 'for i, (fyers_symbol, nse_security_token)' in source
+    assert 'fetch_symbol(client, fyers_symbol, start, end)' in source
+    assert 'r["token"] = nse_security_token' in source
+    assert 'instrument_token' in source
+    assert "NSE:" in source
+    assert "fininstrmid" not in source.lower()

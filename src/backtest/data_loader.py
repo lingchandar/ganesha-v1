@@ -64,6 +64,23 @@ def validate_candle_frame(df: pd.DataFrame, symbol: str = "UNKNOWN") -> None:
             raise ValueError(f"{symbol}: delivery_percentage must be between 0 and 100")
 
 
+def validate_trade_dates(df: pd.DataFrame, symbol: str = "UNKNOWN") -> None:
+    """Validate that historical sessions are strictly ordered and date-indexed."""
+    if "trade_date" in df.columns:
+        dates = pd.to_datetime(df["trade_date"], errors="coerce")
+    else:
+        dates = pd.to_datetime(pd.Series(df.index), errors="coerce")
+
+    if dates.isna().any():
+        raise ValueError(f"{symbol}: invalid trade dates found")
+
+    if not dates.is_monotonic_increasing:
+        raise ValueError(f"{symbol}: trade dates must be sorted ascending")
+
+    if dates.duplicated().any():
+        raise ValueError(f"{symbol}: duplicate trading dates found")
+
+
 class HistoricalDataLoader:
     """
     Manages historical market data for all Nifty 100 constituent equities,
@@ -152,6 +169,7 @@ class HistoricalDataLoader:
                 },
                 inplace=True,
             )
+            validate_trade_dates(df_t, symbol=ticker)
             validate_candle_frame(df_t, symbol=ticker)
             df_t.set_index("trade_date", inplace=True)
             self.stock_candles[ticker] = df_t
@@ -196,6 +214,7 @@ class HistoricalDataLoader:
                 df_bench = df_bench[df_bench.index >= start_date]
             if end_date:
                 df_bench = df_bench[df_bench.index <= end_date]
+            validate_trade_dates(df_bench, symbol="NIFTY50")
             validate_candle_frame(
                 df_bench.reset_index().rename(columns={"trade_date": "trade_date"}),
                 symbol="NIFTY50",

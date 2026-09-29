@@ -72,6 +72,52 @@ class MockDataLoader(HistoricalDataLoader):
 
 # ── Test Cases ──
 
+def _make_valid_loader_frame() -> pd.DataFrame:
+    return pd.DataFrame({
+        "trade_date": [date(2025, 1, 1), date(2025, 1, 2)],
+        "open": [100.0, 101.0],
+        "high": [105.0, 106.0],
+        "low": [99.0, 100.0],
+        "close": [103.0, 104.0],
+        "volume": [1000, 1100],
+        "delivery_volume": [600, np.nan],
+        "delivery_percentage": [60.0, np.nan],
+    })
+
+
+def test_candle_validation_accepts_missing_delivery_data():
+    from src.backtest.data_loader import validate_candle_frame
+
+    validate_candle_frame(_make_valid_loader_frame(), symbol="NSE:TEST-EQ")
+
+
+@pytest.mark.parametrize(
+    "mutator, message",
+    [
+        (lambda df: df.assign(volume=[1000, -1]), "volume cannot be negative"),
+        (lambda df: df.assign(high=[105.0, 99.0]), "high must be"),
+        (lambda df: df.assign(low=[99.0, 107.0]), "low must be"),
+        (lambda df: df.assign(close=[103.0, np.nan]), "non-finite"),
+        (lambda df: df.assign(delivery_percentage=[60.0, 101.0]), "delivery_percentage"),
+    ],
+)
+def test_candle_validation_rejects_invalid_values(mutator, message):
+    from src.backtest.data_loader import validate_candle_frame
+
+    with pytest.raises(ValueError, match=message):
+        validate_candle_frame(mutator(_make_valid_loader_frame()), symbol="NSE:TEST-EQ")
+
+
+def test_candle_validation_rejects_duplicate_trade_dates():
+    from src.backtest.data_loader import validate_candle_frame
+
+    df = _make_valid_loader_frame()
+    df.loc[1, "trade_date"] = df.loc[0, "trade_date"]
+
+    with pytest.raises(ValueError, match="duplicate trading dates"):
+        validate_candle_frame(df, symbol="NSE:TEST-EQ")
+
+
 def test_backtest_config_defaults():
     """Verify default institutional backtest parameters."""
     cfg = BacktestConfig()

@@ -50,7 +50,29 @@ CREATE TABLE IF NOT EXISTS universe_membership_history (
 CREATE INDEX IF NOT EXISTS idx_membership_history_lookup
 ON universe_membership_history (universe_name, ticker_symbol, effective_from, effective_to);
 
--- 4. Daily evidence snapshots of the NSE-listed universe.
+-- 4. Current NSE CM security master.
+-- This is the raw exchange universe; it is NOT the FYERS instrument master
+-- and it is NOT the final swing-eligible universe.
+CREATE TABLE IF NOT EXISTS nse_security_master_current (
+    symbol VARCHAR(25) NOT NULL,
+    series_code VARCHAR(10) NOT NULL,
+    isin VARCHAR(20),
+    company_name VARCHAR(150),
+    security_status VARCHAR(30),
+    nse_security_token BIGINT,
+    first_seen_date DATE NOT NULL,
+    last_seen_date DATE NOT NULL,
+    source VARCHAR(50) NOT NULL,
+    source_file VARCHAR(255),
+    source_sha256 CHAR(64),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (symbol, series_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_nse_security_master_symbol
+ON nse_security_master_current (symbol);
+
+-- 5. Daily evidence snapshots of the NSE-listed universe.
 CREATE TABLE IF NOT EXISTS universe_membership_snapshot (
     snapshot_date DATE NOT NULL,
     universe_name VARCHAR(50) NOT NULL DEFAULT 'NSE_LISTED_EQUITY',

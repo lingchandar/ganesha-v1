@@ -4,7 +4,7 @@ GANESHA V1 — Universe Sync: Fetches and stores the active NIFTY 100 constituen
 Runs on the 1st trading session of every month to refresh the eligible universe.
 Upserts into nse_eligible_universe table, marking removed stocks as inactive.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import text
 from loguru import logger
 
@@ -24,6 +24,7 @@ def sync_nifty100_universe() -> int:
 
     client = MarketDataClient()
     synced_count = 0
+    sync_date = datetime.now(timezone.utc).date()
 
     try:
         client.authenticate()
@@ -31,6 +32,25 @@ def sync_nifty100_universe() -> int:
         logger.info(f"Fetched {len(symbols)} symbols from broker API")
 
         with get_db_session() as db:
+            # Historical membership is recorded separately from the mutable live master.
+            existing = db.execute(text("""
+                SELECT ticker_symbol, instrument_token
+                FROM universe_membership_history
+                WHERE universe_name = 'NSE_SWING' AND effective_to IS NULL
+            """)).mappings().all()
+            existing_symbols = {row["ticker_symbol"]: row["instrument_token"] for row in existing}
+            incoming_symbols = {sym["symbol"]: sym["token"] for sym in symbols}
+
+            # Close memberships that disappeared from the latest universe snapshot.
+            for ticker in existing_symbols.keys() - incoming_symbols.keys():
+                db.execute(text("""
+                    UPDATE universe_membership_history
+                    SET effective_to = :effective_to
+                    WHERE universe_name = 'NSE_SWING'
+                      AND ticker_symbol = :ticker
+                      AND effective_to IS NULL
+                """), {"ticker": ticker, "effective_to": sync_date})
+
             # Step 1: Mark ALL existing stocks as inactive
             db.execute(
                 text("UPDATE nse_eligible_universe SET is_active_swing = FALSE")
@@ -59,11 +79,38 @@ def sync_nifty100_universe() -> int:
                         "name": sym["name"],
                         "sector": sym["sector"],
                         "industry": sym.get("industry", ""),
-                        "now": datetime.now(),
+                        "now": datetime.now(timezone.utc),
                     },
                 )
                 # Preserve classification history instead of relying on the mutable master row.
-                sync_date = datetime.now().date()
+                membership = db.execute(text("""
+                    SELECT instrument_token
+                    FROM universe_membership_history
+                    WHERE universe_name = 'NSE_SWING'
+                      AND ticker_symbol = :ticker
+                      AND effective_to IS NULL
+                    ORDER BY effective_from DESC
+                    LIMIT 1
+                """), {"ticker": sym["symbol"]}).mappings().first()
+                if membership is None:
+                    db.execute(text("""
+                        INSERT INTO universe_membership_history
+                            (universe_name, ticker_symbol, instrument_token, effective_from)
+                        VALUES ('NSE_SWING', :ticker, :token, :effective_from)
+                    """), {"ticker": sym["symbol"], "token": sym["token"], "effective_from": sync_date})
+                elif int(membership["instrument_token"]) != int(sym["token"]):
+                    db.execute(text("""
+                        UPDATE universe_membership_history
+                        SET effective_to = :effective_from
+                        WHERE universe_name = 'NSE_SWING'
+                          AND ticker_symbol = :ticker
+                          AND effective_to IS NULL
+                    """), {"ticker": sym["symbol"], "effective_from": sync_date})
+                    db.execute(text("""
+                        INSERT INTO universe_membership_history
+                            (universe_name, ticker_symbol, instrument_token, effective_from)
+                        VALUES ('NSE_SWING', :ticker, :token, :effective_from)
+                    """), {"ticker": sym["symbol"], "token": sym["token"], "effective_from": sync_date})
                 previous = db.execute(text("""
                     SELECT sector_name, industry_name
                     FROM universe_sector_history

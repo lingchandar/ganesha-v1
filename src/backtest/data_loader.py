@@ -378,11 +378,22 @@ class HistoricalDataLoader:
         """Return the sector classification valid on a historical scan date."""
         if self.sector_history_df.empty:
             raise RuntimeError("Point-in-time sector history is empty")
+        effective_from = pd.to_datetime(
+            self.sector_history_df["effective_from"], errors="coerce"
+        ).dt.date
+        effective_to = pd.to_datetime(
+            self.sector_history_df["effective_to"], errors="coerce"
+        ).dt.date
+
+        # Build the open-ended interval mask separately. Pandas comparisons
+        # against NaT can raise before the boolean OR is applied.
+        valid_from = effective_from <= as_of_date
+        valid_to = effective_to.isna() | (effective_to > as_of_date)
+
         rows = self.sector_history_df[
             (self.sector_history_df["ticker_symbol"] == ticker)
-            & (pd.to_datetime(self.sector_history_df["effective_from"]).dt.date <= as_of_date)
-            & (self.sector_history_df["effective_to"].isna()
-               | (pd.to_datetime(self.sector_history_df["effective_to"]).dt.date > as_of_date))
+            & valid_from
+            & valid_to
         ]
         if rows.empty:
             raise RuntimeError(f"No point-in-time sector classification for {ticker} on {as_of_date}")

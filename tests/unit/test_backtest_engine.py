@@ -136,6 +136,34 @@ def test_pending_order_limit_fill_when_price_reached():
     assert engine.cash < 100_000.0
 
 
+
+
+def test_pending_order_favorable_gap_down_fills_at_open():
+    """A buy-limit order gets price improvement when the market opens below the limit."""
+    engine = BacktestEngine(config=BacktestConfig(initial_capital_inr=100_000.0))
+    trade_date = date(2025, 2, 4)
+    order = PendingOrder(
+        ticker_symbol="NSE:INFY-EQ", sector="IT", setup_type="TREND_PULLBACK",
+        entry_price=100.0, stop_loss=95.0, target_price=110.0,
+        invalidation_level=94.0, shares=100, capital_required_inr=10_000.0,
+        capital_at_risk_net_inr=600.0, estimated_entry_friction_inr=25.0,
+        risk_reward_ratio=2.0, scan_date=trade_date - timedelta(days=1),
+    )
+    engine.pending_orders = [order]
+    engine.data_loader.stock_candles["NSE:INFY-EQ"] = pd.DataFrame(
+        {"open": [96.0], "high": [99.0], "low": [95.0], "close": [98.0], "volume": [50000]},
+        index=[trade_date],
+    )
+    engine._execute_pending_orders(trade_date)
+    assert len(engine.active_positions) == 1
+    assert engine.active_positions[0].entry_price == 96.0
+
+
+def test_backtest_warmup_default_is_sufficient_for_long_lookback_features():
+    """Warmup must cover EMA200/long setup lookbacks rather than only short indicators."""
+    assert BacktestConfig().min_warmup_bars >= 300
+
+
 def test_pending_order_unfilled_when_price_runs_away():
     """Verify limit order does not fill when stock gaps up and never pulls back to limit."""
     engine = BacktestEngine(config=BacktestConfig(initial_capital_inr=100_000.0))

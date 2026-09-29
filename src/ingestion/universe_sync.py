@@ -5,10 +5,12 @@ exchange universe. FYERS remains the live market-data provider and is not
 used to define which NSE securities exist.
 """
 from datetime import date
+import pandas as pd
 from loguru import logger
 from sqlalchemy import text
 
 from src.core.database import get_db_session
+from src.ingestion.liquidity_filter import LiquidityConfig, evaluate_liquidity
 from src.ingestion.nse_security_master import (
     download_security_master,
     parse_security_master_csv,
@@ -16,7 +18,36 @@ from src.ingestion.nse_security_master import (
     persist_security_snapshot,
     save_raw_snapshot,
     security_snapshot_hash,
+    filter_equity_series,
 )
+
+
+
+def build_swing_universe(
+    membership,
+    candles_by_ticker,
+    config: LiquidityConfig = LiquidityConfig(),
+):
+    """Apply the point-in-time liquidity gate to NSE stock membership.
+
+    Missing candle history fails closed. No future observations are used:
+    callers must provide candles only through the evaluation date.
+    """
+    rows = []
+    for row in membership.to_dict("records"):
+        ticker = row["ticker_symbol"]
+        candles = candles_by_ticker.get(ticker)
+        result = (
+            evaluate_liquidity(candles, config)
+            if candles is not None
+            else {
+                "eligible": False,
+                "reason": "MISSING_LIQUIDITY_HISTORY",
+                "observations": 0,
+            }
+        )
+        rows.append({**row, **result})
+    return pd.DataFrame(rows)
 
 
 def sync_nse_security_master(snapshot_date: date | None = None) -> int:

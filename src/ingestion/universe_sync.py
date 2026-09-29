@@ -19,8 +19,8 @@ from src.ingestion.nse_security_master import (
     save_raw_snapshot,
     security_snapshot_hash,
     filter_equity_series,
+    to_fyers_equity_symbol,
 )
-
 
 
 def build_swing_universe(
@@ -73,7 +73,6 @@ def sync_nse_security_master(snapshot_date: date | None = None) -> int:
             source_file=source_file,
             source_sha256=source_sha256,
         )
-        # Store every CM row as evidence. Do not silently reduce this to NIFTY.
         persist_security_snapshot(
             db,
             snapshot_date,
@@ -84,14 +83,13 @@ def sync_nse_security_master(snapshot_date: date | None = None) -> int:
             universe_name="NSE_LISTED_CM",
         )
 
-        # Maintain the point-in-time stock universe from the same official
-        # snapshot. Historical membership is closed when a stock disappears
-        # from the eligible NSE stock set.
         equity = filter_equity_series(parsed)
         current_tickers = set()
         for row in equity.to_dict("records"):
-            ticker = f"NSE:{row['symbol']}-EQ"
-            current_tickers.add(ticker)
+            # Keep the NSE security ID as internal evidence, but store the
+            # exchange-qualified symbol used by FYERS for market-data calls.
+            fyers_symbol = to_fyers_equity_symbol(row["symbol"])
+            current_tickers.add(fyers_symbol)
             db.execute(
                 text("""
                     INSERT INTO universe_membership_history
@@ -102,7 +100,7 @@ def sync_nse_security_master(snapshot_date: date | None = None) -> int:
                     DO UPDATE SET instrument_token = EXCLUDED.instrument_token
                 """),
                 {
-                    "ticker": ticker,
+                    "ticker": fyers_symbol,
                     "token": int(row["instrument_token"])
                     if row.get("instrument_token") is not None else 0,
                     "effective_from": snapshot_date,

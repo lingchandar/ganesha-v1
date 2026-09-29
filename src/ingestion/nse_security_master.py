@@ -299,13 +299,14 @@ def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[by
     )
     response.raise_for_status()
 
-    content_type = response.headers.get("Content-Type", "") if hasattr(response, "headers") else ""
-    body_preview = response.text[:500] if hasattr(response, "text") else ""
-    if "json" not in content_type.lower():
+    headers = getattr(response, "headers", {}) or {}
+    content_type = headers.get("Content-Type", "")
+    body_preview = getattr(response, "text", "")[:500]
+    if content_type and "json" not in content_type.lower():
         raise ValueError(
             "NSE reports API did not return JSON "
-            f"(status={response.status_code}, content_type={content_type!r}, "
-            f"body={body_preview!r})"
+            f"(status={getattr(response, 'status_code', 'unknown')}, "
+            f"content_type={content_type!r}, body={body_preview!r})"
         )
 
     try:
@@ -313,8 +314,8 @@ def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[by
     except ValueError as exc:
         raise ValueError(
             "NSE reports API returned invalid JSON "
-            f"(status={response.status_code}, content_type={content_type!r}, "
-            f"body={body_preview!r})"
+            f"(status={getattr(response, 'status_code', 'unknown')}, "
+            f"content_type={content_type!r}, body={body_preview!r})"
         ) from exc
 
     metadata = _find_report_file(payload, snapshot_date)

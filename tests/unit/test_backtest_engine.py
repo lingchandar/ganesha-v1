@@ -84,6 +84,71 @@ class MockDataLoader(HistoricalDataLoader):
         self._is_loaded = True
 
 
+def test_point_in_time_sector_mapping_uses_historical_classification(mock_candles_df):
+    """A sector change must apply only from its effective date onward."""
+    ticker = "NSE:TEST-EQ"
+    loader = MockDataLoader({ticker: mock_candles_df}, {ticker: "IT"})
+
+    loader.sector_history_df = pd.DataFrame([
+        {
+            "ticker_symbol": ticker,
+            "sector_name": "IT",
+            "industry_name": None,
+            "effective_from": date(2025, 1, 1),
+            "effective_to": date(2025, 1, 15),
+        },
+        {
+            "ticker_symbol": ticker,
+            "sector_name": "FINANCIAL_SERVICES",
+            "industry_name": None,
+            "effective_from": date(2025, 1, 15),
+            "effective_to": None,
+        },
+    ])
+
+    assert loader._sector_for_date(ticker, date(2025, 1, 14)) == "IT"
+    assert loader._sector_for_date(ticker, date(2025, 1, 15)) == "FINANCIAL_SERVICES"
+    assert loader._sector_for_date(ticker, date(2025, 1, 20)) == "FINANCIAL_SERVICES"
+
+
+def test_point_in_time_sector_mapping_does_not_use_future_classification(mock_candles_df):
+    """A future sector classification must not leak into an earlier scan."""
+    ticker = "NSE:TEST-EQ"
+    loader = MockDataLoader({ticker: mock_candles_df}, {ticker: "IT"})
+
+    loader.sector_history_df = pd.DataFrame([
+        {
+            "ticker_symbol": ticker,
+            "sector_name": "IT",
+            "industry_name": None,
+            "effective_from": date(2025, 1, 1),
+            "effective_to": date(2025, 2, 1),
+        },
+        {
+            "ticker_symbol": ticker,
+            "sector_name": "FINANCIAL_SERVICES",
+            "industry_name": None,
+            "effective_from": date(2025, 2, 1),
+            "effective_to": None,
+        },
+    ])
+
+    assert loader._sector_for_date(ticker, date(2025, 1, 25)) == "IT"
+
+
+def test_point_in_time_sector_mapping_rejects_missing_historical_classification(mock_candles_df):
+    """Historical scans must fail closed when no sector history exists."""
+    ticker = "NSE:TEST-EQ"
+    loader = MockDataLoader({ticker: mock_candles_df}, {ticker: "IT"})
+    loader.sector_history_df = pd.DataFrame(columns=[
+        "ticker_symbol", "sector_name", "industry_name",
+        "effective_from", "effective_to",
+    ])
+
+    with pytest.raises(RuntimeError, match="sector history is empty"):
+        loader._sector_for_date(ticker, date(2025, 1, 10))
+
+
 # ── Test Cases ──
 
 def _make_valid_loader_frame() -> pd.DataFrame:

@@ -132,3 +132,78 @@ def test_download_preserves_nse_archive_error_after_session_warmup(monkeypatch):
         module.NSE_REPORTS_URL,
         module.build_security_master_url(date(2026, 9, 25)),
     ]
+
+
+def test_find_report_file_matches_requested_security_master():
+    from src.ingestion.nse_security_master import _find_report_file
+
+    payload = {
+        "data": [{
+            "displayName": "CM - MII - Security File (.gz) (NSE Listed securities)",
+            "fileActlName": "NSE_CM_security_25092026.csv.gz",
+            "filePath": "https://nsearchives.nseindia.com/content/equities/",
+            "tradingDate": "25-Sep-2026",
+        }]
+    }
+
+    result = _find_report_file(payload, date(2026, 9, 25))
+
+    assert result["fileActlName"] == "NSE_CM_security_25092026.csv.gz"
+    assert result["filePath"].endswith("/content/equities/")
+
+
+def test_find_report_file_returns_none_for_missing_date():
+    from src.ingestion.nse_security_master import _find_report_file
+
+    payload = {
+        "data": [{
+            "fileActlName": "NSE_CM_security_24092026.csv.gz",
+            "filePath": "https://nsearchives.nseindia.com/content/equities/",
+        }]
+    }
+
+    assert _find_report_file(payload, date(2026, 9, 25)) is None
+
+
+def test_download_uses_nse_reports_api(monkeypatch):
+    from src.ingestion import nse_security_master as module
+
+    class FakeResponse:
+        def __init__(self, content=b"", payload=None):
+            self.content = content
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            if url == module.NSE_REPORTS_URL:
+                return FakeResponse(content=b"landing")
+            if url == module.NSE_REPORTS_API_URL:
+                return FakeResponse(payload={
+                    "data": [{
+                        "displayName": module.NSE_SECURITY_REPORT_NAME,
+                        "fileActlName": "NSE_CM_security_25092026.csv.gz",
+                        "filePath": "https://nsearchives.nseindia.com/content/equities/",
+                    }]
+                })
+            return FakeResponse(content=b"gzipped-data")
+
+    fake = FakeSession()
+    monkeypatch.setattr(module, "_nse_session", lambda: fake)
+
+    raw, url = module.download_security_master(date(2026, 9, 25))
+
+    assert raw == b"gzipped-data"
+    assert url.endswith("NSE_CM_security_25092026.csv.gz")
+    assert fake.calls[0][0] == module.NSE_REPORTS_URL
+    assert fake.calls[1][0] == module.NSE_REPORTS_API_URL
+    assert fake.calls[2][0] == url

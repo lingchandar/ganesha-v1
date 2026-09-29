@@ -135,7 +135,7 @@ def seed_derivative_expiry_calendar(start_year: int = datetime.now().year,
                 VALUES (:e, :cm, TRUE, :b, CURRENT_TIMESTAMP)
                 ON CONFLICT (expiry_date) DO UPDATE SET
                     contract_month = EXCLUDED.contract_month,
-                    three_day_buffer_start = EXCLUDED.three_day_expiry
+                    three_day_buffer_start = EXCLUDED.three_day_buffer_start
             """), {"e": expiry, "cm": cm, "b": buf})
     logger.success(f"Seeded {len(rows)} monthly expiry rows.")
 

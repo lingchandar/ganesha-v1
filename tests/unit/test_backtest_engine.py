@@ -115,6 +115,37 @@ def test_zero_lookahead_excludes_future_delivery_data(mock_candles_df):
     assert candidate["today_delivery"] == 60_000
 
 
+def test_delivery_history_excludes_current_session(mock_candles_df):
+    """The delivery baseline must use only sessions before the scan date."""
+    stocks = {"NSE:TEST-EQ": mock_candles_df.copy()}
+    stocks["NSE:TEST-EQ"].loc[date(2025, 1, 25), "delivery_volume"] = 123_456
+    loader = MockDataLoader(stocks, {"NSE:TEST-EQ": "FINANCIAL_SERVICES"})
+
+    _, candidates = loader.get_point_in_time_slice(
+        as_of_date=date(2025, 1, 25), min_bars_required=10
+    )
+    candidate = candidates["NSE:TEST-EQ"]
+
+    assert candidate["today_delivery"] == 123_456
+    assert 123_456 not in candidate["delivery_history"]
+    assert len(candidate["delivery_history"]) == 24
+
+
+def test_missing_current_delivery_does_not_reuse_previous_day(mock_candles_df):
+    """A missing current delivery value must stay missing, not reuse T-1."""
+    stocks = {"NSE:TEST-EQ": mock_candles_df.copy()}
+    stocks["NSE:TEST-EQ"].loc[date(2025, 1, 25), "delivery_volume"] = np.nan
+    loader = MockDataLoader(stocks, {"NSE:TEST-EQ": "FINANCIAL_SERVICES"})
+
+    _, candidates = loader.get_point_in_time_slice(
+        as_of_date=date(2025, 1, 25), min_bars_required=10
+    )
+    candidate = candidates["NSE:TEST-EQ"]
+
+    assert candidate["today_delivery"] is None
+    assert len(candidate["delivery_history"]) == 23
+
+
 def test_missing_delivery_data_is_not_synthesized(mock_candles_df):
     """Missing delivery data must not be replaced with a fabricated percentage."""
     stocks = {"NSE:TEST-EQ": mock_candles_df.copy()}

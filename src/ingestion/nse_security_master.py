@@ -12,6 +12,7 @@ import csv
 import gzip
 import hashlib
 import io
+import json
 import re
 from dataclasses import dataclass
 from datetime import date

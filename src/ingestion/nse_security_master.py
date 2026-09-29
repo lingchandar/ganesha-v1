@@ -119,7 +119,104 @@ def parse_security_master_csv(raw: bytes) -> pd.DataFrame:
             df["instrument_token"], errors="coerce"
         ).astype("Int64")
 
+    for column in ("isin", "company_name", "status"):
+        df[column] = df[column].where(df[column].notna(), None)
+
     return df
+
+
+def to_fyers_equity_symbol(symbol: str) -> str:
+    """Convert a raw NSE equity symbol to FYERS equity-symbol format."""
+    value = str(symbol).strip().upper()
+    if value.startswith("NSE:"):
+        return value if value.endswith("-EQ") else f"{value}-EQ"
+    return f"NSE:{value}-EQ"
+
+
+def persist_current_security_master(
+    db,
+    snapshot_date: date,
+    df: pd.DataFrame,
+    *,
+    source: str,
+    source_file: str,
+    source_sha256: str,
+) -> int:
+    """Replace the current raw NSE CM master while retaining first/last seen dates."""
+    required = {"symbol", "series", "isin", "company_name", "status", "instrument_token"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Security master frame missing columns: {sorted(missing)}")
+
+    rows = df.to_dict("records")
+    for row in rows:
+        db.execute(
+            text("""
+                INSERT INTO nse_security_master_current
+                    (symbol, series_code, isin, company_name, security_status,
+                     nse_security_token, first_seen_date, last_seen_date,
+                     source, source_file, source_sha256)
+                VALUES
+                    (:symbol, :series, :isin, :company_name, :status,
+                     :token, :snapshot_date, :snapshot_date,
+                     :source, :source_file, :source_sha256)
+                ON CONFLICT (symbol, series_code)
+                DO UPDATE SET
+                    isin = EXCLUDED.isin,
+                    company_name = EXCLUDED.company_name,
+                    security_status = EXCLUDED.security_status,
+                    nse_security_token = EXCLUDED.nse_security_token,
+                    last_seen_date = EXCLUDED.last_seen_date,
+                    source = EXCLUDED.source,
+                    source_file = EXCLUDED.source_file,
+                    source_sha256 = EXCLUDED.source_sha256,
+                    updated_at = CURRENT_TIMESTAMP
+            """),
+            {
+                "symbol": row["symbol"],
+                "series": row["series"],
+                "isin": row.get("isin"),
+                "company_name": row.get("company_name"),
+                "status": row.get("status"),
+                "token": int(row["instrument_token"]) if pd.notna(row["instrument_token"]) else None,
+                "snapshot_date": snapshot_date,
+                "source": source,
+                "source_file": source_file,
+                "source_sha256": source_sha256,
+            },
+        )
+    return len(rows)
+
+
+def ingest_daily_security_master(
+    snapshot_date: date,
+    db,
+    *,
+    raw_directory: str | Path = "data/nse_security_master",
+) -> int:
+    """Download, hash, archive, parse and persist one official NSE CM master."""
+    raw, source_file = download_security_master(snapshot_date)
+    source_sha256 = security_snapshot_hash(raw)
+    save_raw_snapshot(raw, snapshot_date, raw_directory)
+    parsed = parse_security_master_csv(raw)
+    persist_current_security_master(
+        db,
+        snapshot_date,
+        parsed,
+        source="NSE_CM_MII_SECURITY",
+        source_file=source_file,
+        source_sha256=source_sha256,
+    )
+    persist_security_snapshot(
+        db,
+        snapshot_date,
+        parsed,
+        source="NSE_CM_MII_SECURITY",
+        source_file=source_file,
+        source_sha256=source_sha256,
+        universe_name="NSE_LISTED_CM",
+    )
+    return len(parsed)
 
 
 def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[bytes, str]:

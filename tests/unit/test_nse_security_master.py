@@ -62,6 +62,29 @@ def test_equity_filter_is_separate_from_ingestion():
 
 
 
+def test_parse_actual_nse_udiff_column_names():
+    raw = (
+        "FinInstrmId,TckrSymb,SctySrs,FinInstrmNm,ISIN,SctyStsNrmlMkt\\n"
+        "12345,RELIANCE,EQ,Reliance Industries Limited,INE002A01018,1\\n"
+        "12346,NDTV-RE,BE,NDTV Rights Entitlement,INE999R01010,6\\n"
+    ).encode()
+
+    result = parse_security_master_csv(raw)
+
+    assert result["symbol"].tolist() == ["RELIANCE", "NDTV-RE"]
+    assert result["series"].tolist() == ["EQ", "BE"]
+    assert result["instrument_token"].tolist() == [12345, 12346]
+    assert result["company_name"].tolist() == [
+        "Reliance Industries Limited",
+        "NDTV Rights Entitlement",
+    ]
+    assert result["security_description"].tolist() == [
+        "Reliance Industries Limited",
+        "NDTV Rights Entitlement",
+    ]
+    assert result["status"].tolist() == ["1", "6"]
+
+
 def test_equity_filter_keeps_equity_series_and_excludes_re_and_etf():
     df = pd.DataFrame(
         {

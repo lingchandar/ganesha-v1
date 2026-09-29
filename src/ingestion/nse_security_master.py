@@ -220,6 +220,8 @@ def ingest_daily_security_master(
 
 
 NSE_REPORTS_URL = "https://www.nseindia.com/all-reports?type=equity"
+NSE_REPORTS_API_URL = "https://www.nseindia.com/api/reports"
+NSE_SECURITY_REPORT_NAME = "CM - MII - Security File (.gz) (NSE Listed securities)"
 
 
 def _nse_session() -> requests.Session:
@@ -233,30 +235,89 @@ def _nse_session() -> requests.Session:
     return session
 
 
-def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[bytes, str]:
-    """Download the official NSE CM security master.
+def _find_report_file(payload: object, snapshot_date: date) -> dict[str, str] | None:
+    """Find the requested security-master file metadata in an NSE report payload."""
+    target_name = f"NSE_CM_security_{snapshot_date:%d%m%Y}.csv.gz"
 
-    NSE serves the report through its All Reports web application and may
-    return HTTP 404 for a direct archive request when the session has not
-    first visited the reports page. Warm the NSE session before requesting
-    the archive. A 404 after warm-up is preserved as a real source error
-    rather than silently substituting a different snapshot date.
-    """
-    url = build_security_master_url(snapshot_date)
+    def walk(value: object):
+        if isinstance(value, dict):
+            actual = str(value.get("fileActlName") or value.get("fileName") or "")
+            path = str(value.get("filePath") or "")
+            display = str(value.get("displayName") or value.get("name") or "")
+            trading_date = str(value.get("tradingDate") or "")
+            if (
+                actual == target_name
+                and path
+                and (
+                    display == NSE_SECURITY_REPORT_NAME
+                    or "security file" in display.lower()
+                    or actual == target_name
+                )
+            ):
+                return {
+                    "fileActlName": actual,
+                    "filePath": path,
+                    "tradingDate": trading_date,
+                }
+            for child in value.values():
+                found = walk(child)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = walk(child)
+                if found:
+                    return found
+        return None
+
+    return walk(payload)
+
+
+def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[bytes, str]:
+    """Download the official NSE CM security master through the NSE reports API."""
     session = _nse_session()
-    session.get(NSE_REPORTS_URL, timeout=timeout)
+    landing = session.get(NSE_REPORTS_URL, timeout=timeout)
+    landing.raise_for_status()
+
+    archives = [{
+        "name": NSE_SECURITY_REPORT_NAME,
+        "type": "daily-reports",
+        "category": "capital-market",
+        "section": "equities",
+    }]
     response = session.get(
-        url,
+        NSE_REPORTS_API_URL,
+        params={
+            "archives": json.dumps(archives),
+            "date": snapshot_date.strftime("%d-%b-%Y"),
+            "type": "equities",
+            "mode": "single",
+        },
+        headers={"Referer": NSE_REPORTS_URL},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+
+    metadata = _find_report_file(response.json(), snapshot_date)
+    if not metadata:
+        raise FileNotFoundError(
+            f"NSE security master is not available through the reports API "
+            f"for {snapshot_date:%Y-%m-%d}"
+        )
+
+    file_url = f"{metadata['filePath']}{metadata['fileActlName']}"
+    download = session.get(
+        file_url,
         headers={
             "Accept": "text/csv,application/gzip,application/octet-stream,*/*",
             "Referer": NSE_REPORTS_URL,
         },
         timeout=timeout,
     )
-    response.raise_for_status()
-    if not response.content:
-        raise ValueError(f"NSE returned an empty security master: {url}")
-    return response.content, url
+    download.raise_for_status()
+    if not download.content:
+        raise ValueError(f"NSE returned an empty security master: {file_url}")
+    return download.content, file_url
 
 
 def security_snapshot_hash(raw: bytes) -> str:

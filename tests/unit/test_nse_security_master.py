@@ -71,3 +71,64 @@ def test_to_fyers_equity_symbol():
 def test_snapshot_hash_is_stable():
     assert security_snapshot_hash(b"abc") == security_snapshot_hash(b"abc")
     assert security_snapshot_hash(b"abc") != security_snapshot_hash(b"abcd")
+
+
+def test_download_warms_nse_reports_session(monkeypatch):
+    from src.ingestion import nse_security_master as module
+
+    class FakeResponse:
+        def __init__(self, content=b"data"):
+            self.content = content
+
+        def raise_for_status(self):
+            return None
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return FakeResponse()
+
+    fake = FakeSession()
+    monkeypatch.setattr(module, "_nse_session", lambda: fake)
+
+    raw, url = module.download_security_master(date(2026, 9, 25))
+
+    assert raw == b"data"
+    assert url.endswith("NSE_CM_security_25092026.csv.gz")
+    assert fake.calls[0][0] == module.NSE_REPORTS_URL
+    assert fake.calls[1][0] == url
+    assert fake.calls[1][1]["headers"]["Referer"] == module.NSE_REPORTS_URL
+
+
+def test_download_preserves_nse_archive_error_after_session_warmup(monkeypatch):
+    from src.ingestion import nse_security_master as module
+
+    class FakeResponse:
+        content = b""
+
+        def raise_for_status(self):
+            raise module.requests.HTTPError("404")
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append(url)
+            return FakeResponse() if url != module.NSE_REPORTS_URL else type(
+                "WarmResponse", (), {"content": b"reports"}
+            )()
+
+    fake = FakeSession()
+    monkeypatch.setattr(module, "_nse_session", lambda: fake)
+
+    with pytest.raises(module.requests.HTTPError):
+        module.download_security_master(date(2026, 9, 25))
+
+    assert fake.calls == [
+        module.NSE_REPORTS_URL,
+        module.build_security_master_url(date(2026, 9, 25)),
+    ]

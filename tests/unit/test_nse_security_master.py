@@ -64,9 +64,9 @@ def test_equity_filter_is_separate_from_ingestion():
 
 def test_parse_actual_nse_udiff_column_names():
     raw = (
-        "FinInstrmId,TckrSymb,SctySrs,FinInstrmNm,ISIN,SctyStsNrmlMkt\\n"
-        "12345,RELIANCE,EQ,Reliance Industries Limited,INE002A01018,1\\n"
-        "12346,NDTV-RE,BE,NDTV Rights Entitlement,INE999R01010,6\\n"
+        "FinInstrmId,TckrSymb,SctySrs,FinInstrmNm,ISIN,SctyStsNrmlMkt\n"
+        "12345,RELIANCE,EQ,Reliance Industries Limited,INE002A01018,1\n"
+        "12346,NDTV-RE,BE,NDTV Rights Entitlement,INE999R01010,6\n"
     ).encode()
 
     result = parse_security_master_csv(raw)

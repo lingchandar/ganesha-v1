@@ -106,3 +106,14 @@ def test_build_swing_universe_requires_membership_and_liquidity():
     assert bool(result.loc["NSE:AAA-EQ", "eligible"]) is True
     assert bool(result.loc["NSE:BBB-EQ", "eligible"]) is False
     assert result.loc["NSE:BBB-EQ", "reason"] == "MISSING_LIQUIDITY_HISTORY"
+
+
+
+def test_candle_backfill_uses_point_in_time_membership():
+    from pathlib import Path
+
+    source = Path("src/ingestion/candle_backfill.py").read_text()
+    assert "FROM universe_membership_history" in source
+    assert "effective_from <= :end_date" in source
+    assert "(effective_to IS NULL OR effective_to > :end_date)" in source
+    assert "FROM nse_eligible_universe" not in source

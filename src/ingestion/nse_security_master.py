@@ -219,14 +219,40 @@ def ingest_daily_security_master(
     return len(parsed)
 
 
+NSE_REPORTS_URL = "https://www.nseindia.com/all-reports?type=equity"
+
+
+def _nse_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 GaneshaV1/1.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+    )
+    return session
+
+
 def download_security_master(snapshot_date: date, timeout: int = 30) -> tuple[bytes, str]:
+    """Download the official NSE CM security master.
+
+    NSE serves the report through its All Reports web application and may
+    return HTTP 404 for a direct archive request when the session has not
+    first visited the reports page. Warm the NSE session before requesting
+    the archive. A 404 after warm-up is preserved as a real source error
+    rather than silently substituting a different snapshot date.
+    """
     url = build_security_master_url(snapshot_date)
-    headers = {
-        "User-Agent": "Mozilla/5.0 GaneshaV1/1.0",
-        "Accept": "text/csv,application/gzip,application/octet-stream,*/*",
-        "Referer": "https://www.nseindia.com/",
-    }
-    response = requests.get(url, headers=headers, timeout=timeout)
+    session = _nse_session()
+    session.get(NSE_REPORTS_URL, timeout=timeout)
+    response = session.get(
+        url,
+        headers={
+            "Accept": "text/csv,application/gzip,application/octet-stream,*/*",
+            "Referer": NSE_REPORTS_URL,
+        },
+        timeout=timeout,
+    )
     response.raise_for_status()
     if not response.content:
         raise ValueError(f"NSE returned an empty security master: {url}")

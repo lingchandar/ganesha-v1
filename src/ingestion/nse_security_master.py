@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
+from sqlalchemy import text
 import requests
 
 
@@ -136,3 +137,58 @@ def save_raw_snapshot(raw: bytes, snapshot_date: date, directory: str | Path) ->
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(raw)
     return path
+
+
+def persist_security_snapshot(
+    db,
+    snapshot_date: date,
+    df: pd.DataFrame,
+    *,
+    source: str,
+    source_file: str,
+    source_sha256: str,
+    universe_name: str = "NSE_LISTED_EQUITY",
+) -> int:
+    """Persist one complete daily security snapshot without applying swing filters."""
+    required = {"symbol", "series", "company_name", "instrument_token"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Snapshot frame missing columns: {sorted(missing)}")
+
+    rows = df.to_dict("records")
+    for row in rows:
+        db.execute(
+            text("""
+                INSERT INTO universe_membership_snapshot
+                    (snapshot_date, universe_name, ticker_symbol, instrument_token,
+                     series_code, company_name, source, source_file, source_sha256,
+                     is_eligible)
+                VALUES
+                    (:snapshot_date, :universe_name, :ticker_symbol, :instrument_token,
+                     :series_code, :company_name, :source, :source_file, :source_sha256,
+                     TRUE)
+                ON CONFLICT (snapshot_date, universe_name, ticker_symbol)
+                DO UPDATE SET
+                    instrument_token = EXCLUDED.instrument_token,
+                    series_code = EXCLUDED.series_code,
+                    company_name = EXCLUDED.company_name,
+                    source = EXCLUDED.source,
+                    source_file = EXCLUDED.source_file,
+                    source_sha256 = EXCLUDED.source_sha256
+            """),
+            {
+                "snapshot_date": snapshot_date,
+                "universe_name": universe_name,
+                "ticker_symbol": row["symbol"],
+                "instrument_token": (
+                    int(row["instrument_token"])
+                    if pd.notna(row["instrument_token"]) else None
+                ),
+                "series_code": row["series"],
+                "company_name": row.get("company_name"),
+                "source": source,
+                "source_file": source_file,
+                "source_sha256": source_sha256,
+            },
+        )
+    return len(rows)

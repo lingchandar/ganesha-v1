@@ -207,3 +207,42 @@ def test_download_uses_nse_reports_api(monkeypatch):
     assert fake.calls[0][0] == module.NSE_REPORTS_URL
     assert fake.calls[1][0] == module.NSE_REPORTS_API_URL
     assert fake.calls[2][0] == url
+
+
+def test_download_accepts_direct_gzip_from_reports_api(monkeypatch):
+    from src.ingestion import nse_security_master as module
+
+    gzip_payload = b"\x1f\x8b\x08direct-security-master"
+
+    class FakeResponse:
+        content = gzip_payload
+        headers = {"Content-Type": "application/x-gzip"}
+        status_code = 200
+        url = module.NSE_REPORTS_API_URL
+        text = ""
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            raise AssertionError("Direct gzip response must not be parsed as JSON")
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return FakeResponse()
+
+    fake = FakeSession()
+    monkeypatch.setattr(module, "_nse_session", lambda: fake)
+
+    raw, url = module.download_security_master(date(2026, 9, 25))
+
+    assert raw == gzip_payload
+    assert url == module.NSE_REPORTS_API_URL
+    assert [call[0] for call in fake.calls] == [
+        module.NSE_REPORTS_URL,
+        module.NSE_REPORTS_API_URL,
+    ]

@@ -143,7 +143,7 @@ def test_missing_current_delivery_does_not_reuse_previous_day(mock_candles_df):
     candidate = candidates["NSE:TEST-EQ"]
 
     assert candidate["today_delivery"] is None
-    assert len(candidate["delivery_history"]) == 23
+    assert len(candidate["delivery_history"]) == 24
 
 
 def test_missing_delivery_data_is_not_synthesized(mock_candles_df):

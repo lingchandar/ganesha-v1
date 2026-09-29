@@ -139,6 +139,7 @@ class HistoricalDataLoader:
         self.stock_candles: Dict[str, pd.DataFrame] = {}
         self.ticker_sectors: Dict[str, str] = {}
         self.sector_history_df: pd.DataFrame = pd.DataFrame()
+        self.membership_history_df: pd.DataFrame = pd.DataFrame()
         self.sector_series: Dict[str, pd.Series] = {}
         self.nifty_benchmark_df: pd.DataFrame = pd.DataFrame()
         self.trading_dates: List[date] = []
@@ -177,7 +178,20 @@ class HistoricalDataLoader:
             """)
             self.sector_history_df = pd.read_sql(sh_query, db.connection())
 
-            # 3. Load historical daily candles
+            # 3. Load point-in-time universe membership history.
+            mh_query = text("""
+                SELECT universe_name, ticker_symbol, instrument_token, effective_from, effective_to
+                FROM universe_membership_history
+                WHERE universe_name = 'NSE_SWING'
+                ORDER BY ticker_symbol, effective_from
+            """)
+            self.membership_history_df = pd.read_sql(mh_query, db.connection())
+            if self.membership_history_df.empty:
+                raise RuntimeError(
+                    "Point-in-time universe membership history is required for historical backtests"
+                )
+
+            # 4. Load historical daily candles
             c_query = text(
                 """
                 SELECT 
@@ -228,13 +242,13 @@ class HistoricalDataLoader:
             df_t.set_index("trade_date", inplace=True)
             self.stock_candles[ticker] = df_t
 
-        # 3. Load or synthesize Nifty 50 benchmark
+        # 5. Load or synthesize Nifty 50 benchmark
         self._load_nifty_benchmark(start_date, end_date)
 
-        # 4. Synthesize Sector Composite Series
+        # 6. Synthesize Sector Composite Series
         self._compute_sector_series()
 
-        # 5. Extract unique sorted trading dates
+        # 7. Extract unique sorted trading dates
         all_dates = set()
         for df in self.stock_candles.values():
             all_dates.update(df.index)
@@ -326,7 +340,9 @@ class HistoricalDataLoader:
                 ]
                 tickers = [
                     ticker for ticker in valid_rows["ticker_symbol"].tolist()
-                    if ticker in self.stock_candles and trade_date in self.stock_candles[ticker].index
+                    if self._is_member_on_date(ticker, trade_date)
+                    and ticker in self.stock_candles
+                    and trade_date in self.stock_candles[ticker].index
                 ]
                 if not tickers:
                     continue
@@ -359,6 +375,9 @@ class HistoricalDataLoader:
 
         candidate_data: Dict[str, Dict[str, Any]] = {}
         for ticker, df in self.stock_candles.items():
+            if not self._is_member_on_date(ticker, as_of_date):
+                continue
+
             df_slice = df[df.index <= as_of_date]
             if len(df_slice) < min_bars_required:
                 continue
@@ -398,6 +417,22 @@ class HistoricalDataLoader:
             }
 
         return nifty_slice, candidate_data
+
+    def _is_member_on_date(self, ticker: str, as_of_date: date) -> bool:
+        """Return whether a ticker belonged to the historical swing universe on a date."""
+        if self.membership_history_df.empty:
+            raise RuntimeError("Point-in-time universe membership history is empty")
+
+        ts = pd.Timestamp(as_of_date)
+        history = self.membership_history_df
+        effective_from = pd.to_datetime(history["effective_from"], errors="coerce")
+        effective_to = pd.to_datetime(history["effective_to"], errors="coerce")
+        valid = (
+            (history["ticker_symbol"] == ticker)
+            & (effective_from <= ts)
+            & (effective_to.isna() | (effective_to > ts))
+        )
+        return bool(valid.any())
 
     def _sector_for_date(self, ticker: str, as_of_date: date) -> str:
         """Return the sector classification valid on a historical scan date."""

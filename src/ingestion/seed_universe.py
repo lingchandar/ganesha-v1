@@ -154,6 +154,20 @@ def seed_nifty100_universe():
             fyers_ticker = f"NSE:{symbol}-EQ"
             db.execute(
                 text("""
+                    INSERT INTO universe_membership_history
+                        (universe_name, ticker_symbol, instrument_token, effective_from)
+                    VALUES ('NSE_SWING', :ticker, :token, :effective_from)
+                    ON CONFLICT (universe_name, ticker_symbol, effective_from) DO NOTHING
+                """),
+                {
+                    "ticker": fyers_ticker,
+                    "token": token_counter,
+                    "effective_from": datetime.now(timezone.utc).date(),
+                },
+            )
+
+            db.execute(
+                text("""
                     INSERT INTO nse_eligible_universe 
                         (instrument_token, ticker_symbol, company_name, sector_name, industry_name, is_active_swing, last_updated_at)
                     VALUES 

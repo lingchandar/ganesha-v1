@@ -61,6 +61,39 @@ def test_equity_filter_is_separate_from_ingestion():
     assert result["symbol"].tolist() == ["AAA", "BBB"]
 
 
+
+def test_equity_filter_keeps_equity_series_and_excludes_re_and_etf():
+    df = pd.DataFrame(
+        {
+            "symbol": [
+                "RELIANCE",
+                "3IINFOLTD",
+                "NDTV-RE",
+                "NIFTYBEES",
+                "AAKAAR",
+                "DEBTSEC",
+            ],
+            "series": ["EQ", "BE", "BE", "EQ", "SM", "N0"],
+            "security_description": [
+                "Reliance Industries Limited",
+                "3i Infotech Limited",
+                "NDTV Rights Entitlement",
+                "Nippon India ETF Nifty BeES",
+                "Aakaar Engineering SME",
+                "Non Convertible Debenture",
+            ],
+        }
+    )
+
+    result = filter_equity_series(df)
+
+    assert result["symbol"].tolist() == [
+        "RELIANCE",
+        "3IINFOLTD",
+        "AAKAAR",
+    ]
+
+
 def test_to_fyers_equity_symbol():
     from src.ingestion.nse_security_master import to_fyers_equity_symbol
 

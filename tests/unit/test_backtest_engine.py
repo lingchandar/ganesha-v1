@@ -135,6 +135,55 @@ def test_trade_date_validation_rejects_invalid_dates():
         validate_trade_dates(df, symbol="NSE:TEST-EQ")
 
 
+def test_benchmark_validation_rejects_invalid_ohlcv():
+    from src.backtest.data_loader import validate_benchmark_frame
+
+    df = pd.DataFrame({
+        "trade_date": [date(2025, 1, 1), date(2025, 1, 2)],
+        "open": [100.0, 101.0],
+        "high": [105.0, 99.0],
+        "low": [99.0, 100.0],
+        "close": [103.0, 104.0],
+        "volume": [1000, 1100],
+    })
+    with pytest.raises(ValueError, match="high must be"):
+        validate_benchmark_frame(df, symbol="NIFTY50")
+
+
+def test_benchmark_validation_rejects_duplicate_or_unsorted_dates():
+    from src.backtest.data_loader import validate_benchmark_frame
+
+    df = pd.DataFrame({
+        "trade_date": [date(2025, 1, 2), date(2025, 1, 1)],
+        "open": [101.0, 100.0],
+        "high": [106.0, 105.0],
+        "low": [100.0, 99.0],
+        "close": [104.0, 103.0],
+        "volume": [1100, 1000],
+    })
+    with pytest.raises(ValueError, match="sorted ascending"):
+        validate_benchmark_frame(df, symbol="NIFTY50")
+
+
+def test_benchmark_validation_rejects_data_outside_requested_end_date():
+    from src.backtest.data_loader import validate_benchmark_frame
+
+    df = pd.DataFrame({
+        "trade_date": [date(2025, 1, 1), date(2025, 1, 3)],
+        "open": [100.0, 101.0],
+        "high": [105.0, 106.0],
+        "low": [99.0, 100.0],
+        "close": [103.0, 104.0],
+        "volume": [1000, 1100],
+    })
+    with pytest.raises(ValueError, match="after requested end date"):
+        validate_benchmark_frame(
+            df,
+            symbol="NIFTY50",
+            required_end_date=date(2025, 1, 2),
+        )
+
+
 def test_backtest_config_defaults():
     """Verify default institutional backtest parameters."""
     cfg = BacktestConfig()

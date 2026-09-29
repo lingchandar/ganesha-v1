@@ -50,10 +50,31 @@ CREATE TABLE IF NOT EXISTS universe_membership_history (
 CREATE INDEX IF NOT EXISTS idx_membership_history_lookup
 ON universe_membership_history (universe_name, ticker_symbol, effective_from, effective_to);
 
--- 2. Point-in-Time Historical Daily OHLCV & Delivery Data
+-- 4. Daily evidence snapshots of the NSE-listed universe.
+CREATE TABLE IF NOT EXISTS universe_membership_snapshot (
+    snapshot_date DATE NOT NULL,
+    universe_name VARCHAR(50) NOT NULL DEFAULT 'NSE_LISTED_EQUITY',
+    ticker_symbol VARCHAR(25) NOT NULL,
+    instrument_token BIGINT,
+    series_code VARCHAR(10),
+    company_name VARCHAR(150),
+    source VARCHAR(50) NOT NULL,
+    source_file VARCHAR(255),
+    is_eligible BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (snapshot_date, universe_name, ticker_symbol)
+);
+
+CREATE INDEX IF NOT EXISTS idx_membership_snapshot_ticker_date
+ON universe_membership_snapshot (ticker_symbol, snapshot_date);
+
+-- 5. Point-in-Time Historical Daily OHLCV & Delivery Data.
+-- Historical candles own their ticker identity and are deliberately NOT
+-- foreign-keyed to the mutable live universe master.
 CREATE TABLE IF NOT EXISTS historical_daily_candles (
     id BIGSERIAL PRIMARY KEY,
-    instrument_token BIGINT NOT NULL REFERENCES nse_eligible_universe(instrument_token) ON DELETE CASCADE,
+    ticker_symbol VARCHAR(25) NOT NULL,
+    instrument_token BIGINT,
     candle_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
     open_price NUMERIC(12, 2) NOT NULL,
     high_price NUMERIC(12, 2) NOT NULL,
@@ -66,7 +87,7 @@ CREATE TABLE IF NOT EXISTS historical_daily_candles (
     CONSTRAINT unique_token_candle_time UNIQUE (instrument_token, candle_timestamp)
 );
 
--- 3. Corporate Actions Registry for CATB Enforcement
+-- 6. Corporate Actions Registry for CATB Enforcement
 CREATE TABLE IF NOT EXISTS corporate_actions_calendar (
     id BIGSERIAL PRIMARY KEY,
     ticker_symbol VARCHAR(25) NOT NULL,
@@ -77,7 +98,7 @@ CREATE TABLE IF NOT EXISTS corporate_actions_calendar (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. NSE Derivative Expiry Calendar for Expiry-Week Volatility Filtering
+-- 7. NSE Derivative Expiry Calendar for Expiry-Week Volatility Filtering
 CREATE TABLE IF NOT EXISTS nse_derivative_expiry_calendar (
     id BIGSERIAL PRIMARY KEY,
     expiry_date DATE NOT NULL UNIQUE,
@@ -87,7 +108,7 @@ CREATE TABLE IF NOT EXISTS nse_derivative_expiry_calendar (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Trade Journal & Audit Registry
+-- 8. Trade Journal & Audit Registry
 CREATE TABLE IF NOT EXISTS ganesha_trade_journal (
     trade_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     scan_date DATE NOT NULL,
@@ -115,6 +136,9 @@ CREATE TABLE IF NOT EXISTS ganesha_trade_journal (
 -- ============================================================================
 
 CREATE INDEX IF NOT EXISTS idx_candles_perf_scan
+ON historical_daily_candles (ticker_symbol, candle_timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_candles_token_scan
 ON historical_daily_candles (instrument_token, candle_timestamp DESC);
 
 CREATE INDEX IF NOT EXISTS idx_universe_sector_group

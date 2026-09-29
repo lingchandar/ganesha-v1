@@ -10,6 +10,8 @@ The 5 Exit Conditions:
 1. TARGET_HIT (+2R): Price touches or exceeds target price (Entry + 2 * Risk).
 2. STOP_LOSS_HIT (-1R): Price touches or breaks structural stop loss.
    (Includes overnight gap-down realism: exits at Open price if gap below SL).
+   If both stop and target are touched in the same daily candle, the stop is
+   assumed to occur first because daily OHLC does not reveal intraday order.
 3. TECHNICAL_INVALIDATION: Daily close violates setup invalidation anchor (e.g. close < 20 EMA).
 4. TIME_EXIT_STAGNATION: Holding period reaches 15 trading days without hitting +2R or -1R.
    (Liquidates position at Day 15 close to release stagnant capital).
@@ -116,6 +118,9 @@ class PrecisionExitEngine:
             )
 
         # ── 3. Intraday Stop Loss Hit (-1R) ──
+        # Conservative daily-bar rule: evaluate the stop before the target.
+        # If both levels are touched in the same OHLC candle, intraday order is
+        # unknown, so the backtest assumes the stop occurred first.
         if c_low <= stop_loss:
             realized_r = -1.00
             pnl_pct = round(((stop_loss - entry_price) / entry_price) * 100.0, 2)

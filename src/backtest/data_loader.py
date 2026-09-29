@@ -214,13 +214,25 @@ class HistoricalDataLoader:
             sector_slice = sector_s[sector_s.index <= as_of_date] if sector_s is not None else None
             nifty_series = nifty_slice["close"] if not nifty_slice.empty else None
 
-            # Delivery history
+            # Delivery must be point-in-time:
+            # - history contains only sessions strictly before as_of_date
+            # - today_delivery contains only the current session's value
+            # Missing delivery data must remain missing; never synthesize a value.
             delivery_hist = []
-            if "delivery_volume" in df_slice.columns:
-                valid_del = df_slice["delivery_volume"].dropna().tolist()
-                delivery_hist = [int(v) for v in valid_del if str(v).isdigit() or isinstance(v, (int, float))]
-            
-            # Missing delivery data must remain missing. Never synthesize a value\n            # because downstream screening treats delivery as a required gate.\n            today_del = delivery_hist[-1] if delivery_hist else None
+            today_del = None
+            if "delivery_volume" in df.columns:
+                prior_del = df.loc[df.index < as_of_date, "delivery_volume"].dropna().tolist()
+                delivery_hist = [
+                    int(v)
+                    for v in prior_del
+                    if isinstance(v, (int, float, np.integer, np.floating)) and np.isfinite(v)
+                ]
+
+                current_del = df.loc[df.index == as_of_date, "delivery_volume"].dropna().tolist()
+                if current_del:
+                    value = current_del[-1]
+                    if isinstance(value, (int, float, np.integer, np.floating)) and np.isfinite(value):
+                        today_del = int(value)
 
             candidate_data[ticker] = {
                 "ohlcv": df_slice.copy(),

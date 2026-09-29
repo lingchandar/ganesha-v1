@@ -135,6 +135,33 @@ def test_trade_date_validation_rejects_invalid_dates():
         validate_trade_dates(df, symbol="NSE:TEST-EQ")
 
 
+
+def test_sector_series_validation_rejects_invalid_values():
+    from src.backtest.data_loader import validate_sector_series
+
+    valid = pd.Series(
+        [100.0, 101.0],
+        index=[date(2025, 1, 1), date(2025, 1, 2)],
+    )
+    validate_sector_series(valid, sector="IT")
+
+    invalid = valid.copy()
+    invalid.iloc[1] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        validate_sector_series(invalid, sector="IT")
+
+
+def test_sector_series_validation_rejects_unsorted_dates():
+    from src.backtest.data_loader import validate_sector_series
+
+    series = pd.Series(
+        [100.0, 101.0],
+        index=[date(2025, 1, 2), date(2025, 1, 1)],
+    )
+    with pytest.raises(ValueError, match="sorted ascending"):
+        validate_sector_series(series, sector="IT")
+
+
 def test_benchmark_validation_rejects_invalid_ohlcv():
     from src.backtest.data_loader import validate_benchmark_frame
 

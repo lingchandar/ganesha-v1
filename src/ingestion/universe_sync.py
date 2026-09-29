@@ -53,6 +53,43 @@ def sync_nse_security_master(snapshot_date: date | None = None) -> int:
             universe_name="NSE_LISTED_CM",
         )
 
+        # Maintain the point-in-time stock universe from the same official
+        # snapshot. Historical membership is closed when a stock disappears
+        # from the eligible NSE stock set.
+        equity = filter_equity_series(parsed)
+        current_tickers = set()
+        for row in equity.to_dict("records"):
+            ticker = f"NSE:{row['symbol']}-EQ"
+            current_tickers.add(ticker)
+            db.execute(
+                text("""
+                    INSERT INTO universe_membership_history
+                        (universe_name, ticker_symbol, instrument_token, effective_from)
+                    VALUES
+                        ('NSE_SWING', :ticker, :token, :effective_from)
+                    ON CONFLICT (universe_name, ticker_symbol, effective_from)
+                    DO UPDATE SET instrument_token = EXCLUDED.instrument_token
+                """),
+                {
+                    "ticker": ticker,
+                    "token": int(row["instrument_token"])
+                    if row.get("instrument_token") is not None else 0,
+                    "effective_from": snapshot_date,
+                },
+            )
+
+        db.execute(
+            text("""
+                UPDATE universe_membership_history
+                SET effective_to = :effective_to
+                WHERE universe_name = 'NSE_SWING'
+                  AND effective_to IS NULL
+                  AND effective_from < :snapshot_date
+                  AND ticker_symbol NOT IN :tickers
+            """).bindparams(__import__("sqlalchemy").bindparam("tickers", expanding=True)),
+            {"effective_to": snapshot_date, "snapshot_date": snapshot_date, "tickers": list(current_tickers)},
+        )
+
     logger.success(
         "NSE security-master sync complete: {} CM securities stored", len(parsed)
     )
@@ -60,18 +97,17 @@ def sync_nse_security_master(snapshot_date: date | None = None) -> int:
 
 
 def sync_nse_equity_universe(snapshot_date: date | None = None) -> int:
-    """Ingest only EQ-series securities for the stock universe.
+    """Ingest the NSE stock universe for the swing scanner.
 
-    This is a separate resolver from the raw CM master so future eligibility
-    rules can exclude ETFs, debt, SME, suspended/illiquid names, etc. without
-    losing the raw exchange evidence.
+    The resolver includes NSE equity/SME series while excluding Rights
+    Entitlements, ETFs and test securities. Liquidity and swing rules remain
+    separate so the raw exchange evidence is never lost.
     """
     snapshot_date = snapshot_date or date.today()
     raw, source_file = download_security_master(snapshot_date)
     source_sha256 = security_snapshot_hash(raw)
     parsed = parse_security_master_csv(raw)
 
-    from src.ingestion.nse_security_master import filter_equity_series
     equity = filter_equity_series(parsed)
 
     with get_db_session() as db:

@@ -49,7 +49,7 @@ class BacktestConfig:
     enable_drawdown_brake: bool = True
     enable_regime_filter: bool = True
     enable_rs_filter: bool = True
-    min_warmup_bars: int = 35
+    min_warmup_bars: int = 300
     start_date: Optional[date] = None
     end_date: Optional[date] = None
 
@@ -309,17 +309,16 @@ class BacktestEngine:
             c_high = candle["high"]
             c_open = candle["open"]
 
-            # Standard limit order fill condition:
-            # If stock opened lower than or traded through entry price:
+            # Buy-limit execution:
+            # If the market opens at/below the limit, fill at the actual open
+            # (price improvement). Otherwise, fill at the limit only if traded down to it.
             is_filled = False
             fill_price = order.entry_price
 
-            if c_low <= order.entry_price <= c_high:
-                # Traded within the day's range -> filled at limit price
+            if c_open <= order.entry_price:
                 is_filled = True
-                fill_price = order.entry_price
-            elif c_open < order.entry_price:
-                # Favorable gap down opening: filled at open price (or limit price)
+                fill_price = c_open
+            elif c_low <= order.entry_price <= c_high:
                 is_filled = True
                 fill_price = order.entry_price
 
@@ -458,15 +457,18 @@ class BacktestEngine:
 
             top_signal = signals[0]
 
-            # Gate C: Institutional Delivery Volume Expansion
-            if delivery_history:
-                del_check = NSEArchiveDeliveryClient().calculate_delivery_expansion(
-                    recent_delivery_history=delivery_history,
-                    today_delivery=today_delivery,
-                    is_expiry_week=is_expiry_week,
-                )
-                if not del_check["is_institutional_accumulation"]:
-                    continue
+            # Gate C: Institutional Delivery Volume Expansion.
+            # Missing delivery data must never silently bypass this gate.
+            if not delivery_history or today_delivery is None:
+                continue
+
+            del_check = NSEArchiveDeliveryClient().calculate_delivery_expansion(
+                recent_delivery_history=delivery_history,
+                today_delivery=today_delivery,
+                is_expiry_week=is_expiry_week,
+            )
+            if not del_check["is_institutional_accumulation"]:
+                continue
 
             # Gate D: Precision Risk Coordinates (+2R Check)
             risk_per_share = top_signal.entry_price - top_signal.stop_loss

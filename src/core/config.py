@@ -52,7 +52,7 @@ class GaneshaConfig(BaseSettings):
     def database_url(self) -> str:
         """Construct the SQLAlchemy-compatible PostgreSQL connection string."""
         return (
-            f"postgresql://{self.db_user}:{self.db_password}"
+            f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
 

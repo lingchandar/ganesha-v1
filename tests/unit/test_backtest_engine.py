@@ -61,6 +61,20 @@ class MockDataLoader(HistoricalDataLoader):
         super().__init__()
         self.stock_candles = stock_dict
         self.ticker_sectors = sector_dict
+
+        # Mock the new point-in-time sector history so existing backtest
+        # slicing tests exercise the same contract as the real loader.
+        rows = []
+        for ticker, sector in sector_dict.items():
+            rows.append({
+                "ticker_symbol": ticker,
+                "sector_name": sector,
+                "industry_name": None,
+                "effective_from": min(stock_dict[ticker].index),
+                "effective_to": None,
+            })
+        self.sector_history_df = pd.DataFrame(rows)
+
         all_dates = set()
         for df in stock_dict.values():
             all_dates.update(df.index)

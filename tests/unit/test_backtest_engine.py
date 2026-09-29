@@ -149,6 +149,55 @@ def test_point_in_time_sector_mapping_rejects_missing_historical_classification(
         loader._sector_for_date(ticker, date(2025, 1, 10))
 
 
+def test_sector_composite_uses_point_in_time_membership():
+    """Historical sector composites must move a stock when its sector changes."""
+    ticker_a = "NSE:A-EQ"
+    ticker_b = "NSE:B-EQ"
+    dates = [date(2025, 1, 1), date(2025, 1, 2)]
+    stock_a = pd.DataFrame(
+        {"close": [100.0, 110.0]},
+        index=dates,
+    )
+    stock_b = pd.DataFrame(
+        {"close": [200.0, 220.0]},
+        index=dates,
+    )
+
+    loader = MockDataLoader(
+        {ticker_a: stock_a, ticker_b: stock_b},
+        {ticker_a: "IT", ticker_b: "IT"},
+    )
+    loader.sector_history_df = pd.DataFrame([
+        {
+            "ticker_symbol": ticker_a,
+            "sector_name": "IT",
+            "industry_name": None,
+            "effective_from": date(2025, 1, 1),
+            "effective_to": date(2025, 1, 2),
+        },
+        {
+            "ticker_symbol": ticker_a,
+            "sector_name": "FINANCIAL_SERVICES",
+            "industry_name": None,
+            "effective_from": date(2025, 1, 2),
+            "effective_to": None,
+        },
+        {
+            "ticker_symbol": ticker_b,
+            "sector_name": "IT",
+            "industry_name": None,
+            "effective_from": date(2025, 1, 1),
+            "effective_to": None,
+        },
+    ])
+
+    loader._compute_sector_series()
+
+    assert loader.sector_series["IT"].loc[date(2025, 1, 1)] == 150.0
+    assert loader.sector_series["IT"].loc[date(2025, 1, 2)] == 220.0
+    assert loader.sector_series["FINANCIAL_SERVICES"].loc[date(2025, 1, 2)] == 110.0
+
+
 # ── Test Cases ──
 
 def _make_valid_loader_frame() -> pd.DataFrame:

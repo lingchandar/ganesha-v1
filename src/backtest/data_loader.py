@@ -234,17 +234,19 @@ class HistoricalDataLoader:
                 },
                 inplace=True,
             )
-            df_bench.set_index("trade_date", inplace=True)
-            if start_date:
-                df_bench = df_bench[df_bench.index >= start_date]
-            if end_date:
-                df_bench = df_bench[df_bench.index <= end_date]
+            # Validate the complete benchmark before applying the requested backtest window.
+            # This prevents filtering from hiding missing history or out-of-range source rows.
             validate_benchmark_frame(
                 df_bench,
                 symbol="NIFTY50",
                 required_start_date=start_date,
                 required_end_date=end_date,
             )
+            df_bench.set_index("trade_date", inplace=True)
+            if start_date:
+                df_bench = df_bench[df_bench.index >= start_date]
+            if end_date:
+                df_bench = df_bench[df_bench.index <= end_date]
             self.nifty_benchmark_df = df_bench
         else:
             # Fallback composite benchmark: equal-weighted close of all stocks

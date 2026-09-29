@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS universe_membership_snapshot (
     company_name VARCHAR(150),
     source VARCHAR(50) NOT NULL,
     source_file VARCHAR(255),
+    source_sha256 CHAR(64),
     is_eligible BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (snapshot_date, universe_name, ticker_symbol)

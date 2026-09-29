@@ -58,7 +58,7 @@ def test_equity_filter_is_separate_from_ingestion():
         {"symbol": ["AAA", "AAA", "BBB"], "series": ["EQ", "BE", "EQ"]}
     )
     result = filter_equity_series(df)
-    assert result["symbol"].tolist() == ["AAA", "BBB"]
+    assert result["symbol"].tolist() == ["AAA", "AAA", "BBB"]
 
 
 

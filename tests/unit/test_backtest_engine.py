@@ -31,7 +31,7 @@ from src.backtest.performance import (
     DailyEquityPoint,
     BacktestPerformanceAnalyzer,
 )
-from src.risk.exit_engine import ExitReason
+from src.risk.exit_engine import ExitReason, PrecisionExitEngine
 
 
 # ── Synthetic Data Fixtures for Deterministic Testing ──
@@ -235,6 +235,30 @@ def test_exit_execution_overnight_gap_down_realism():
     assert closed.exit_price == 90.0  # Filled at open, NOT theoretical 95.0!
     assert closed.gross_pnl_inr == -1000.0
     assert closed.realized_r_multiple < -1.0
+
+
+def test_exit_execution_same_candle_stop_and_target_uses_conservative_stop():
+    """When daily OHLC touches both levels, assume the stop happened first."""
+    candle = {
+        "open": 100.0,
+        "high": 112.0,
+        "low": 94.0,
+        "close": 108.0,
+    }
+
+    result = PrecisionExitEngine.evaluate_active_trade(
+        entry_price=100.0,
+        stop_loss=95.0,
+        target_price=110.0,
+        invalidation_level=94.0,
+        days_held=2,
+        daily_candle=candle,
+    )
+
+    assert result.is_exit_triggered is True
+    assert result.exit_reason == ExitReason.STOP_LOSS_HIT.value
+    assert result.exit_price == 95.0
+    assert result.realized_r_multiple == -1.0
 
 
 def test_exit_execution_target_hit_plus_2r():

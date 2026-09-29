@@ -118,6 +118,23 @@ def test_candle_validation_rejects_duplicate_trade_dates():
         validate_candle_frame(df, symbol="NSE:TEST-EQ")
 
 
+def test_trade_date_validation_rejects_unsorted_dates():
+    from src.backtest.data_loader import validate_trade_dates
+
+    df = _make_valid_loader_frame().iloc[::-1].reset_index(drop=True)
+    with pytest.raises(ValueError, match="sorted ascending"):
+        validate_trade_dates(df, symbol="NSE:TEST-EQ")
+
+
+def test_trade_date_validation_rejects_invalid_dates():
+    from src.backtest.data_loader import validate_trade_dates
+
+    df = _make_valid_loader_frame()
+    df.loc[1, "trade_date"] = "not-a-date"
+    with pytest.raises(ValueError, match="invalid trade dates"):
+        validate_trade_dates(df, symbol="NSE:TEST-EQ")
+
+
 def test_backtest_config_defaults():
     """Verify default institutional backtest parameters."""
     cfg = BacktestConfig()

@@ -138,6 +138,7 @@ class HistoricalDataLoader:
         self.universe_df: pd.DataFrame = pd.DataFrame()
         self.stock_candles: Dict[str, pd.DataFrame] = {}
         self.ticker_sectors: Dict[str, str] = {}
+        self.sector_history_df: pd.DataFrame = pd.DataFrame()
         self.sector_series: Dict[str, pd.Series] = {}
         self.nifty_benchmark_df: pd.DataFrame = pd.DataFrame()
         self.trading_dates: List[date] = []
@@ -168,7 +169,15 @@ class HistoricalDataLoader:
                 zip(self.universe_df["ticker_symbol"], self.universe_df["sector_name"])
             )
 
-            # 2. Load historical daily candles
+            # 2. Load point-in-time sector classifications
+            sh_query = text("""
+                SELECT ticker_symbol, sector_name, industry_name, effective_from, effective_to
+                FROM universe_sector_history
+                ORDER BY ticker_symbol, effective_from
+            """)
+            self.sector_history_df = pd.read_sql(sh_query, db.connection())
+
+            # 3. Load historical daily candles
             c_query = text(
                 """
                 SELECT 
@@ -329,7 +338,7 @@ class HistoricalDataLoader:
             if len(df_slice) < min_bars_required:
                 continue
 
-            sector = self.ticker_sectors.get(ticker, "UNKNOWN")
+            sector = self._sector_for_date(ticker, as_of_date)
             sector_s = self.sector_series.get(sector)
             sector_slice = sector_s[sector_s.index <= as_of_date] if sector_s is not None else None
             nifty_series = nifty_slice["close"] if not nifty_slice.empty else None
@@ -364,6 +373,20 @@ class HistoricalDataLoader:
             }
 
         return nifty_slice, candidate_data
+
+    def _sector_for_date(self, ticker: str, as_of_date: date) -> str:
+        """Return the sector classification valid on a historical scan date."""
+        if self.sector_history_df.empty:
+            raise RuntimeError("Point-in-time sector history is empty")
+        rows = self.sector_history_df[
+            (self.sector_history_df["ticker_symbol"] == ticker)
+            & (pd.to_datetime(self.sector_history_df["effective_from"]).dt.date <= as_of_date)
+            & (self.sector_history_df["effective_to"].isna()
+               | (pd.to_datetime(self.sector_history_df["effective_to"]).dt.date > as_of_date))
+        ]
+        if rows.empty:
+            raise RuntimeError(f"No point-in-time sector classification for {ticker} on {as_of_date}")
+        return str(rows.iloc[-1]["sector_name"])
 
     def get_candle_for_date(self, ticker: str, trade_date: date) -> Optional[Dict[str, float]]:
         """

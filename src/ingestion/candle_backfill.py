@@ -1,4 +1,4 @@
-"""
+""" 
 GANESHA V1 — Historical Candle Backfill (Fyers API v3)
 Usage:
     .venv/bin/python -m src.ingestion.candle_backfill --years 3
@@ -22,12 +22,13 @@ CHUNK_DAYS = 360  # Fyers caps daily-resolution requests at ~366 days
 
 INSERT_SQL = text("""
     INSERT INTO historical_daily_candles (
-        instrument_token, candle_timestamp, open_price, high_price, low_price,
+        ticker_symbol, instrument_token, candle_timestamp, open_price, high_price, low_price,
         close_price, volume_traded, delivery_volume, delivery_percentage,
         is_corporate_action_adjusted
     ) VALUES (
-        :token, :ts, :o, :h, :l, :c, :v, NULL, NULL, TRUE
+        :ticker_symbol, :token, :ts, :o, :h, :l, :c, :v, NULL, NULL, TRUE
     ) ON CONFLICT (instrument_token, candle_timestamp) DO UPDATE SET
+        ticker_symbol = EXCLUDED.ticker_symbol,
         open_price = EXCLUDED.open_price,
         high_price = EXCLUDED.high_price,
         low_price = EXCLUDED.low_price,
@@ -93,6 +94,7 @@ def backfill_all(years: int = 3) -> None:
                 logger.warning(f"[{i}/{len(universe)}] {fyers_symbol}: no candles returned")
                 continue
             for r in rows:
+                r["ticker_symbol"] = fyers_symbol
                 r["token"] = nse_security_token
             with get_db_session() as db:
                 db.execute(INSERT_SQL, rows)
@@ -133,7 +135,7 @@ def seed_derivative_expiry_calendar(start_year: int = datetime.now().year,
                 VALUES (:e, :cm, TRUE, :b, CURRENT_TIMESTAMP)
                 ON CONFLICT (expiry_date) DO UPDATE SET
                     contract_month = EXCLUDED.contract_month,
-                    three_day_buffer_start = EXCLUDED.three_day_buffer_start
+                    three_day_buffer_start = EXCLUDED.three_day_expiry
             """), {"e": expiry, "cm": cm, "b": buf})
     logger.success(f"Seeded {len(rows)} monthly expiry rows.")
 

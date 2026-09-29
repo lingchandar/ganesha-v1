@@ -81,6 +81,31 @@ def validate_trade_dates(df: pd.DataFrame, symbol: str = "UNKNOWN") -> None:
         raise ValueError(f"{symbol}: duplicate trading dates found")
 
 
+def validate_benchmark_frame(
+    df: pd.DataFrame,
+    symbol: str = "NIFTY50",
+    required_start_date: Optional[date] = None,
+    required_end_date: Optional[date] = None,
+) -> None:
+    """Validate a real benchmark frame used by historical backtests."""
+    frame = df.reset_index() if "trade_date" not in df.columns else df.copy()
+    validate_trade_dates(frame, symbol=symbol)
+    validate_candle_frame(frame, symbol=symbol)
+
+    dates = pd.to_datetime(frame["trade_date"], errors="coerce").dt.date
+    if required_start_date is not None and dates.min() > required_start_date:
+        raise ValueError(
+            f"{symbol}: benchmark starts at {dates.min()}, "
+            f"after required start date {required_start_date}"
+        )
+    if required_end_date is not None and dates.max() > required_end_date:
+        raise ValueError(
+            f"{symbol}: benchmark contains data after requested end date "
+            f"{required_end_date}"
+        )
+
+
+
 class HistoricalDataLoader:
     """
     Manages historical market data for all Nifty 100 constituent equities,
@@ -214,10 +239,11 @@ class HistoricalDataLoader:
                 df_bench = df_bench[df_bench.index >= start_date]
             if end_date:
                 df_bench = df_bench[df_bench.index <= end_date]
-            validate_trade_dates(df_bench, symbol="NIFTY50")
-            validate_candle_frame(
-                df_bench.reset_index().rename(columns={"trade_date": "trade_date"}),
+            validate_benchmark_frame(
+                df_bench,
                 symbol="NIFTY50",
+                required_start_date=start_date,
+                required_end_date=end_date,
             )
             self.nifty_benchmark_df = df_bench
         else:

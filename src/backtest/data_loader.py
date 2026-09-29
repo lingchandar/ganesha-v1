@@ -195,7 +195,7 @@ class HistoricalDataLoader:
             c_query = text(
                 """
                 SELECT 
-                    u.ticker_symbol,
+                    c.ticker_symbol,
                     c.candle_timestamp,
                     c.open_price,
                     c.high_price,
@@ -205,7 +205,6 @@ class HistoricalDataLoader:
                     c.delivery_volume,
                     c.delivery_percentage
                 FROM historical_daily_candles c
-                JOIN nse_eligible_universe u ON c.instrument_token = u.instrument_token
                 ORDER BY c.candle_timestamp ASC
                 """
             )

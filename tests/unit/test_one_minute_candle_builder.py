@@ -34,7 +34,8 @@ def test_builds_ohlcv_and_uses_cumulative_volume_delta():
     assert candle.high_price == 2004.0
     assert candle.low_price == 1998.0
     assert candle.close_price == 1998.0
-    assert candle.volume_traded == 230
+    # FYERS volume is cumulative; 230 - 100 = 130 traded during this minute.
+    assert candle.volume_traded == 130
     assert candle.tick_count == 3
     assert completed == [candle]
 
@@ -54,7 +55,8 @@ def test_flush_returns_open_candle():
 
     assert len(candles) == 1
     assert candles[0].close_price == 2000.0
-    assert candles[0].volume_traded == 100
+    # The first cumulative session-volume tick cannot be attributed to this minute.
+    assert candles[0].volume_traded == 0
 
 
 def test_missing_ltp_or_timestamp_is_ignored():

@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Callable, Optional
 
 import pandas as pd
 
 from src.ingestion.live_ohlcv_buffer import LiveOHLCVBuffer
+from src.ingestion.market_data_client import MarketDataClient
 from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 from src.ingestion.timeframe_aggregator import TimeframeAggregator
 from src.setups.swing_setups import SwingSetupScanner
 
 
 class LiveAnalysisEngine:
-    """Aggregate live candles and run deterministic setup scans."""
+    """Warm up from FYERS history, then continue from completed live candles."""
 
     def __init__(
         self,
@@ -25,8 +27,8 @@ class LiveAnalysisEngine:
     ) -> None:
         if min_candles < 60:
             raise ValueError("min_candles must be >= 60 for the swing scanner")
-        if max_candles < analysis_timeframe_minutes:
-            raise ValueError("max_candles must cover at least one analysis bar")
+        if max_candles < min_candles:
+            raise ValueError("max_candles must be >= min_candles")
 
         self.min_candles = min_candles
         self.analysis_timeframe_minutes = analysis_timeframe_minutes
@@ -37,6 +39,38 @@ class LiveAnalysisEngine:
         self.analysis_buffers = LiveOHLCVBuffer(max_candles=max_candles)
         self.scanner = scanner or SwingSetupScanner()
         self.signal_handler = signal_handler
+
+    def warm_up(self, symbol: str, client: MarketDataClient, lookback_days: int = 7) -> int:
+        """Load completed analysis candles from FYERS before live monitoring starts."""
+        if lookback_days < 1:
+            raise ValueError("lookback_days must be >= 1")
+
+        end = date.today() - timedelta(days=1)
+        start = end - timedelta(days=lookback_days)
+
+        history = client.fetch_historical_candles(
+            symbol,
+            start,
+            end,
+            resolution=str(self.analysis_timeframe_minutes),
+        )
+        if history.empty:
+            return 0
+
+        for row in history.tail(self.analysis_buffers.max_candles).itertuples(index=False):
+            candle = OneMinuteCandle(
+                symbol=symbol,
+                timestamp=pd.Timestamp(row.timestamp).to_pydatetime(),
+                open_price=float(row.open_price),
+                high_price=float(row.high_price),
+                low_price=float(row.low_price),
+                close_price=float(row.close_price),
+                volume_traded=int(row.volume_traded),
+                tick_count=self.analysis_timeframe_minutes,
+            )
+            self.analysis_buffers.add(candle)
+
+        return self.analysis_buffers.count(symbol)
 
     def on_candle(self, candle: OneMinuteCandle) -> list:
         """Accept a completed 1-minute candle and scan on completed analysis bars."""

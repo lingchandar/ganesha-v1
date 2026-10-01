@@ -6,6 +6,14 @@ Usage:
 The process only reads FYERS market data. It never places orders.
 """
 
+from pathlib import Path
+import sys
+
+# Allow direct execution from the repository root without requiring PYTHONPATH=.
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from src.ingestion.live_swing_monitor import LiveSwingMonitor
 
 
@@ -33,4 +41,7 @@ if __name__ == "__main__":
 
     print("Starting FYERS live stream...")
     monitor.start()
-    monitor.candle_engine.run_forever()
+    try:
+        monitor.candle_engine.run_forever()
+    except KeyboardInterrupt:
+        print("\nLive monitor stopped by user.")

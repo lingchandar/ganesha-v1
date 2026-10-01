@@ -39,4 +39,5 @@ def test_tick_handler_reaches_candle_builder():
     assert candles[0].symbol == "NSE:TCS-EQ"
     assert candles[0].open_price == 2000.0
     assert candles[0].close_price == 2000.0
-    assert candles[0].volume_traded == 100
+    # The first cumulative session-volume tick is not attributable to 09:15.
+    assert candles[0].volume_traded == 0

@@ -16,7 +16,8 @@ def fetch_index_constituents(index, session=None, timeout=30):
     if key not in INDEX_NAMES:
         raise ValueError(f"Unsupported NSE index: {index}")
     http = session or requests.Session()
-    http.headers.update({"User-Agent": "Mozilla/5.0 GaneshaV1/1.0", "Accept": "application/json", "Referer": "https://www.nseindia.com/"})
+    if hasattr(http, "headers"):
+        http.headers.update({"User-Agent": "Mozilla/5.0 GaneshaV1/1.0", "Accept": "application/json", "Referer": "https://www.nseindia.com/"})
     response = http.get(NSE_INDEX_API_URL, params={"index": INDEX_NAMES[key]}, timeout=timeout)
     response.raise_for_status()
     payload = response.json()

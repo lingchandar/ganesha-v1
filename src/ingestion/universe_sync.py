@@ -158,3 +158,20 @@ def sync_nse_equity_universe(snapshot_date: date | None = None) -> int:
 
 if __name__ == "__main__":
     sync_nse_security_master()
+
+def load_current_swing_symbols(db, as_of: date | None = None) -> list[str]:
+    """Load point-in-time FYERS symbols currently in the NSE_SWING membership."""
+    as_of = as_of or date.today()
+    rows = db.execute(
+        text("""
+            SELECT ticker_symbol
+            FROM universe_membership_history
+            WHERE universe_name = 'NSE_SWING'
+              AND effective_from <= :as_of
+              AND (effective_to IS NULL OR effective_to > :as_of)
+            ORDER BY ticker_symbol
+        """),
+        {"as_of": as_of},
+    ).scalars().all()
+    return [str(symbol) for symbol in rows if str(symbol).strip()]
+

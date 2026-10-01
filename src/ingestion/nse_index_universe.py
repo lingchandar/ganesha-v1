@@ -5,8 +5,10 @@ from src.ingestion.nse_security_master import to_fyers_equity_symbol
 NSE_INDEX_API_URL = "https://www.nseindia.com/api/equity-stockIndices"
 INDEX_NAMES = {"NIFTY50": "NIFTY 50", "BANKNIFTY": "NIFTY BANK"}
 
+
 def normalize_index_symbols(symbols):
     return tuple(sorted({to_fyers_equity_symbol(s) for s in symbols if str(s).strip()}))
+
 
 def fetch_index_constituents(index, session=None, timeout=30):
     import requests
@@ -21,10 +23,11 @@ def fetch_index_constituents(index, session=None, timeout=30):
     rows = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(rows, list):
         raise ValueError("NSE index response does not contain a data list")
-    result = normalize_index_symbols(row.get("symbol") for row in rows if isinstance(row, dict) and row.get("symbol"))
+    result = normalize_index_symbols(row.get("symbol") for row in rows if isinstance(row, dict) and row.get("symbol") and str(row.get("symbol")).upper() not in {"NIFTY 50", "NIFTY BANK"})
     if not result:
         raise ValueError(f"NSE returned no constituents for {INDEX_NAMES[key]}")
     return result
+
 
 def load_controlled_index_universe(session=None, timeout=30):
     symbols = set()

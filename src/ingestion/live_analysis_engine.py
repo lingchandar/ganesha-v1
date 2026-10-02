@@ -13,6 +13,7 @@ from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 from src.ingestion.timeframe_aggregator import TimeframeAggregator
 from src.risk.active_trade_manager import ActiveTradeManager
 from src.risk.position_sizer import PositionSizingEngine
+from src.risk.circuit_breakers import PortfolioCircuitBreakers
 from src.setups.swing_setups import SwingSetupSignal
 from src.setups.swing_setups import SwingSetupScanner
 
@@ -29,6 +30,7 @@ class LiveAnalysisEngine:
         signal_handler: Optional[Callable[[str, list], None]] = None,
         trade_manager: Optional[ActiveTradeManager] = None,
         position_sizer=PositionSizingEngine,
+        circuit_breakers=PortfolioCircuitBreakers,
     ) -> None:
         if min_candles < 60:
             raise ValueError("min_candles must be >= 60 for the swing scanner")
@@ -46,6 +48,7 @@ class LiveAnalysisEngine:
         self.signal_handler = signal_handler
         self.trade_manager = trade_manager or ActiveTradeManager()
         self.position_sizer = position_sizer
+        self.circuit_breakers = circuit_breakers
 
     def warm_up(self, symbol: str, client: MarketDataClient, lookback_days: int = 7) -> int:
         """Load completed analysis candles from FYERS before live monitoring starts."""
@@ -133,6 +136,21 @@ class LiveAnalysisEngine:
                     )
                     if not sizing.is_executable:
                         continue
+
+                    active_positions = [{
+                        "ticker_symbol": trade.ticker_symbol,
+                        "sector": "UNKNOWN",
+                        "capital_at_risk_net_inr": trade.shares * (trade.entry_price - trade.stop_loss),
+                    } for trade in self.trade_manager.active_trades.values()]
+                    capacity = self.circuit_breakers.evaluate_candidate_capacity(
+                        active_positions=active_positions,
+                        candidate_ticker=signal.ticker_symbol,
+                        candidate_sector="UNKNOWN",
+                        candidate_risk_inr=sizing.capital_at_risk_net_inr,
+                    )
+                    if not capacity.is_allowed:
+                        continue
+
                     self.trade_manager.open_trade(
                         signal=signal,
                         entry_date=latest["timestamp"].date(),

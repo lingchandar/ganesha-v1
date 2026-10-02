@@ -12,6 +12,7 @@ from src.ingestion.market_data_client import MarketDataClient
 from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 from src.ingestion.timeframe_aggregator import TimeframeAggregator
 from src.risk.active_trade_manager import ActiveTradeManager
+from src.setups.swing_setups import SwingSetupSignal
 from src.setups.swing_setups import SwingSetupScanner
 
 
@@ -116,6 +117,8 @@ class LiveAnalysisEngine:
         # by ActiveTradeManager rather than creating duplicate positions.
         if signals:
             for signal in signals:
+                if not isinstance(signal, SwingSetupSignal):
+                    continue
                 if self.trade_manager.has_active_trade(candle.symbol):
                     break
                 try:

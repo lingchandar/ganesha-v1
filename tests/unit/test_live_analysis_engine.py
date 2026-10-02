@@ -99,3 +99,4 @@ def test_entry_signal_is_registered_as_active_trade():
     assert trade.entry_price == 2100.0
     assert trade.stop_loss == 2050.0
     assert trade.target_price == 2200.0
+    assert trade.shares > 0

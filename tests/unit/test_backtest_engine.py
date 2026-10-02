@@ -778,3 +778,74 @@ def test_performance_summary_metrics_calculation():
     assert summary.avg_win_r == 2.0
     assert summary.avg_loss_r == 1.0
     assert summary.expectancy_r == 0.5  # (0.5 * 2.0) - (0.5 * 1.0) = 0.5
+
+
+
+def test_non_trading_day_does_not_increment_holding_days():
+    engine = BacktestEngine(config=BacktestConfig(initial_capital_inr=100_000.0))
+    first_date = date(2025, 2, 5)
+    skipped_date = date(2025, 2, 6)
+
+    pos = BacktestPosition(
+        position_id="hold1",
+        ticker_symbol="NSE:TEST-EQ",
+        sector="IT",
+        setup_type="TREND_PULLBACK",
+        entry_date=first_date,
+        entry_price=100.0,
+        shares=10,
+        capital_invested=1000.0,
+        initial_stop_loss=95.0,
+        target_price=110.0,
+        invalidation_level=94.0,
+        entry_friction_inr=0.0,
+        capital_at_risk_net_inr=50.0,
+        days_held=0,
+    )
+    engine.active_positions = [pos]
+
+    engine.data_loader.stock_candles["NSE:TEST-EQ"] = pd.DataFrame(
+        {"open": [100.0], "high": [102.0], "low": [99.0], "close": [101.0], "volume": [1000]},
+        index=[first_date],
+    )
+
+    engine._evaluate_active_position_exits(skipped_date)
+
+    assert len(engine.active_positions) == 1
+    assert engine.active_positions[0].days_held == 0
+
+
+def test_final_liquidation_reconciles_equity_curve():
+    engine = BacktestEngine(config=BacktestConfig(initial_capital_inr=100_000.0))
+    final_date = date(2025, 2, 10)
+
+    engine.data_loader.stock_candles["NSE:TEST-EQ"] = pd.DataFrame(
+        {"open": [100.0], "high": [101.0], "low": [99.0], "close": [105.0], "volume": [1000]},
+        index=[final_date],
+    )
+    engine.active_positions = [
+        BacktestPosition(
+            position_id="final1",
+            ticker_symbol="NSE:TEST-EQ",
+            sector="IT",
+            setup_type="TREND_PULLBACK",
+            entry_date=date(2025, 2, 7),
+            entry_price=100.0,
+            shares=10,
+            capital_invested=1000.0,
+            initial_stop_loss=95.0,
+            target_price=120.0,
+            invalidation_level=94.0,
+            entry_friction_inr=0.0,
+            capital_at_risk_net_inr=50.0,
+            days_held=3,
+        )
+    ]
+    engine._record_daily_snapshot(final_date)
+    engine._close_all_open_positions(final_date, reason="BACKTEST_TERMINATION")
+
+    snapshot = engine.daily_equity_curve[-1]
+    assert snapshot.invested_capital_inr == 0.0
+    assert snapshot.open_positions_count == 0
+    assert snapshot.total_equity_inr == engine.cash
+    assert engine.cash > 100_000.0

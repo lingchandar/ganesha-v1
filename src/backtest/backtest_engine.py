@@ -604,3 +604,22 @@ class BacktestEngine:
             self.closed_trades.append(closed)
 
         self.active_positions = []
+
+        # Reconcile the final equity-curve point with post-liquidation cash.
+        # The normal daily snapshot is recorded before forced liquidation.
+        final_equity = self.cash
+        if final_equity > self.peak_equity:
+            self.peak_equity = final_equity
+        dd_pct = ((self.peak_equity - final_equity) / self.peak_equity) * 100.0 if self.peak_equity > 0 else 0.0
+        final_snapshot = DailyEquityPoint(
+            trade_date=final_date,
+            cash_inr=round(self.cash, 2),
+            invested_capital_inr=0.0,
+            total_equity_inr=round(final_equity, 2),
+            open_positions_count=0,
+            drawdown_pct=round(dd_pct, 2),
+        )
+        if self.daily_equity_curve and self.daily_equity_curve[-1].trade_date == final_date:
+            self.daily_equity_curve[-1] = final_snapshot
+        else:
+            self.daily_equity_curve.append(final_snapshot)

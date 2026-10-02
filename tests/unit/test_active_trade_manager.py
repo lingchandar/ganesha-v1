@@ -99,3 +99,22 @@ def test_close_all_like_evaluation():
         assert result.exit_reason == ExitReason.TARGET_HIT.value
 
     assert len(manager.active_trades) == 0
+
+
+def test_target_exit_creates_complete_closed_trade_record():
+    manager = ActiveTradeManager()
+    manager.open_trade(make_signal(), date(2026, 10, 1), shares=25)
+
+    manager.evaluate_daily_candle(
+        "NSE:TCS-EQ",
+        date(2026, 10, 2),
+        {"open": 101, "high": 121, "low": 100, "close": 118},
+    )
+
+    record = manager.closed_trade_records[-1]
+    assert record.ticker_symbol == "NSE:TCS-EQ"
+    assert record.exit_price == 120.0
+    assert record.shares == 25
+    assert record.holding_days == 1
+    assert record.realized_r_multiple == 2.0
+    assert record.pnl_inr == 500.0

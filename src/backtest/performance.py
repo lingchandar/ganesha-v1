@@ -112,6 +112,47 @@ class PerformanceSummary:
 
 
 class BacktestPerformanceAnalyzer:
+    """Computes statistical and institutional risk metrics."""
+
+    @staticmethod
+    def closed_trade_to_backtest_trade(
+        trade,
+        trade_id: str,
+        sector: str = "UNKNOWN",
+        entry_friction_inr: float = 0.0,
+        exit_friction_inr: float = 0.0,
+    ) -> BacktestTrade:
+        """Adapt a live ClosedTrade into the common performance schema."""
+        capital_invested = trade.entry_price * trade.shares
+        gross_pnl = (trade.exit_price - trade.entry_price) * trade.shares
+        total_friction = entry_friction_inr + exit_friction_inr
+        net_pnl = gross_pnl - total_friction
+        net_return_pct = (net_pnl / capital_invested) * 100.0 if capital_invested > 0 else 0.0
+        return BacktestTrade(
+            trade_id=trade_id,
+            ticker_symbol=trade.ticker_symbol,
+            sector=sector,
+            setup_type=trade.setup_type,
+            entry_date=trade.entry_date,
+            entry_price=trade.entry_price,
+            shares=trade.shares,
+            capital_invested=round(capital_invested, 2),
+            initial_stop_loss=trade.stop_loss,
+            target_price=trade.target_price,
+            invalidation_level=trade.stop_loss,
+            exit_date=trade.exit_date,
+            exit_price=trade.exit_price,
+            exit_reason=trade.exit_reason,
+            holding_days=trade.holding_days,
+            gross_pnl_inr=round(gross_pnl, 2),
+            entry_friction_inr=round(entry_friction_inr, 2),
+            exit_friction_inr=round(exit_friction_inr, 2),
+            total_friction_inr=round(total_friction, 2),
+            net_pnl_inr=round(net_pnl, 2),
+            net_return_pct=round(net_return_pct, 2),
+            realized_r_multiple=trade.realized_r_multiple,
+        )
+
     """
     Computes statistical and institutional risk metrics from closed trades
     and daily equity curve snapshots.

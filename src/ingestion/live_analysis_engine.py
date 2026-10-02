@@ -11,6 +11,7 @@ from src.ingestion.live_ohlcv_buffer import LiveOHLCVBuffer
 from src.ingestion.market_data_client import MarketDataClient
 from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 from src.ingestion.timeframe_aggregator import TimeframeAggregator
+from src.risk.active_trade_manager import ActiveTradeManager
 from src.setups.swing_setups import SwingSetupScanner
 
 
@@ -24,6 +25,7 @@ class LiveAnalysisEngine:
         analysis_timeframe_minutes: int = 15,
         scanner: Optional[SwingSetupScanner] = None,
         signal_handler: Optional[Callable[[str, list], None]] = None,
+        trade_manager: Optional[ActiveTradeManager] = None,
     ) -> None:
         if min_candles < 60:
             raise ValueError("min_candles must be >= 60 for the swing scanner")
@@ -39,6 +41,7 @@ class LiveAnalysisEngine:
         self.analysis_buffers = LiveOHLCVBuffer(max_candles=max_candles)
         self.scanner = scanner or SwingSetupScanner()
         self.signal_handler = signal_handler
+        self.trade_manager = trade_manager or ActiveTradeManager()
 
     def warm_up(self, symbol: str, client: MarketDataClient, lookback_days: int = 7) -> int:
         """Load completed analysis candles from FYERS before live monitoring starts."""
@@ -107,6 +110,23 @@ class LiveAnalysisEngine:
             ticker_symbol=candle.symbol,
             df=df,
         )
+
+        # Register the first qualifying signal as a paper trade. A symbol can
+        # have only one active position; repeated setup detections are ignored
+        # by ActiveTradeManager rather than creating duplicate positions.
+        if signals:
+            for signal in signals:
+                if self.trade_manager.has_active_trade(candle.symbol):
+                    break
+                try:
+                    self.trade_manager.open_trade(
+                        signal=signal,
+                        entry_date=latest["timestamp"].date(),
+                    )
+                except ValueError:
+                    # Invalid/duplicate setup must never break the live feed.
+                    continue
+
         if self.signal_handler:
             self.signal_handler(candle.symbol, signals)
         return signals

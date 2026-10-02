@@ -8,10 +8,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from src.risk.exit_engine import ExitEvaluationResult, PrecisionExitEngine
 from src.setups.swing_setups import SwingSetupSignal
+
+
+@dataclass
+class ClosedTrade:
+    ticker_symbol: str
+    setup_type: str
+    entry_date: date
+    exit_date: date
+    entry_price: float
+    exit_price: float
+    stop_loss: float
+    target_price: float
+    shares: int
+    holding_days: int
+    exit_reason: str
+    realized_r_multiple: float
+    pnl_percentage: float
+    pnl_inr: float
 
 
 @dataclass
@@ -57,6 +75,7 @@ class ActiveTradeManager:
         self.exit_engine = exit_engine
         self._active_trades: Dict[str, ActiveTrade] = {}
         self._closed_trades: Dict[str, ExitEvaluationResult] = {}
+        self._closed_trade_records: List[ClosedTrade] = []
 
     @property
     def active_trades(self) -> Dict[str, ActiveTrade]:
@@ -65,6 +84,10 @@ class ActiveTradeManager:
     @property
     def closed_trades(self) -> Dict[str, ExitEvaluationResult]:
         return dict(self._closed_trades)
+
+    @property
+    def closed_trade_records(self) -> List[ClosedTrade]:
+        return list(self._closed_trade_records)
 
     def has_active_trade(self, ticker_symbol: str) -> bool:
         return ticker_symbol in self._active_trades
@@ -129,6 +152,7 @@ class ActiveTradeManager:
         if result.is_exit_triggered:
             trade.is_open = False
             self._closed_trades[ticker_symbol] = result
+            self._closed_trade_records.append(ClosedTrade(ticker_symbol=trade.ticker_symbol, setup_type=trade.setup_type, entry_date=trade.entry_date, exit_date=evaluation_date, entry_price=trade.entry_price, exit_price=result.exit_price, stop_loss=trade.stop_loss, target_price=trade.target_price, shares=trade.shares, holding_days=result.holding_days_elapsed, exit_reason=result.exit_reason, realized_r_multiple=result.realized_r_multiple, pnl_percentage=result.pnl_percentage, pnl_inr=round((result.exit_price - trade.entry_price) * trade.shares, 2)))
             del self._active_trades[ticker_symbol]
 
         return result

@@ -210,13 +210,15 @@ class BacktestEngine:
         remaining_positions: List[BacktestPosition] = []
 
         for pos in self.active_positions:
-            pos.days_held += 1
             candle = self.data_loader.get_candle_for_date(pos.ticker_symbol, current_date)
 
             if candle is None:
-                # Stock didn't trade today (e.g. trading halt or holiday)
+                # Stock didn't trade today (e.g. trading halt or holiday).
+                # Do not increment holding time when no session occurred.
                 remaining_positions.append(pos)
                 continue
+
+            pos.days_held += 1
 
             exit_res = PrecisionExitEngine.evaluate_active_trade(
                 entry_price=pos.entry_price,
@@ -347,7 +349,7 @@ class BacktestEngine:
                     )
                     self.active_positions.append(new_pos)
 
-        # Orders that did not fill today expire
+        # Orders that did not fill today expire.
         self.pending_orders = []
 
     def _record_daily_snapshot(self, current_date: date) -> None:

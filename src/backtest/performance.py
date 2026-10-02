@@ -139,7 +139,7 @@ class BacktestPerformanceAnalyzer:
             capital_invested=round(capital_invested, 2),
             initial_stop_loss=trade.stop_loss,
             target_price=trade.target_price,
-            invalidation_level=trade.stop_loss,
+            invalidation_level=float(trade.invalidation_level),
             exit_date=trade.exit_date,
             exit_price=trade.exit_price,
             exit_reason=trade.exit_reason,
@@ -151,6 +151,55 @@ class BacktestPerformanceAnalyzer:
             net_pnl_inr=round(net_pnl, 2),
             net_return_pct=round(net_return_pct, 2),
             realized_r_multiple=trade.realized_r_multiple,
+        )
+
+    @classmethod
+    def closed_trades_to_backtest_trades(
+        cls,
+        closed_trades: List[Any],
+        sector_by_symbol: Optional[Dict[str, str]] = None,
+        frictions_by_trade_id: Optional[Dict[str, tuple[float, float]]] = None,
+    ) -> List[BacktestTrade]:
+        """Convert closed runtime trades into the common backtest schema."""
+        sector_by_symbol = sector_by_symbol or {}
+        frictions_by_trade_id = frictions_by_trade_id or {}
+
+        converted: List[BacktestTrade] = []
+        for index, trade in enumerate(closed_trades, start=1):
+            trade_id = f"closed-{index:06d}"
+            entry_friction, exit_friction = frictions_by_trade_id.get(
+                trade_id, (0.0, 0.0)
+            )
+            converted.append(
+                cls.closed_trade_to_backtest_trade(
+                    trade=trade,
+                    trade_id=trade_id,
+                    sector=sector_by_symbol.get(trade.ticker_symbol, "UNKNOWN"),
+                    entry_friction_inr=entry_friction,
+                    exit_friction_inr=exit_friction,
+                )
+            )
+        return converted
+
+    @classmethod
+    def analyze_closed_trades(
+        cls,
+        closed_trades: List[Any],
+        equity_curve: List[DailyEquityPoint],
+        initial_capital: float,
+        sector_by_symbol: Optional[Dict[str, str]] = None,
+        frictions_by_trade_id: Optional[Dict[str, tuple[float, float]]] = None,
+    ) -> PerformanceSummary:
+        """Analyze runtime closed trades using the standard performance engine."""
+        trades = cls.closed_trades_to_backtest_trades(
+            closed_trades=closed_trades,
+            sector_by_symbol=sector_by_symbol,
+            frictions_by_trade_id=frictions_by_trade_id,
+        )
+        return cls.analyze(
+            trades=trades,
+            equity_curve=equity_curve,
+            initial_capital=initial_capital,
         )
 
     """

@@ -12,6 +12,7 @@ from src.ingestion.market_data_client import MarketDataClient
 from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 from src.ingestion.timeframe_aggregator import TimeframeAggregator
 from src.risk.active_trade_manager import ActiveTradeManager
+from src.risk.position_sizer import PositionSizingEngine
 from src.setups.swing_setups import SwingSetupSignal
 from src.setups.swing_setups import SwingSetupScanner
 
@@ -27,6 +28,7 @@ class LiveAnalysisEngine:
         scanner: Optional[SwingSetupScanner] = None,
         signal_handler: Optional[Callable[[str, list], None]] = None,
         trade_manager: Optional[ActiveTradeManager] = None,
+        position_sizer=PositionSizingEngine,
     ) -> None:
         if min_candles < 60:
             raise ValueError("min_candles must be >= 60 for the swing scanner")
@@ -43,6 +45,7 @@ class LiveAnalysisEngine:
         self.scanner = scanner or SwingSetupScanner()
         self.signal_handler = signal_handler
         self.trade_manager = trade_manager or ActiveTradeManager()
+        self.position_sizer = position_sizer
 
     def warm_up(self, symbol: str, client: MarketDataClient, lookback_days: int = 7) -> int:
         """Load completed analysis candles from FYERS before live monitoring starts."""
@@ -122,9 +125,18 @@ class LiveAnalysisEngine:
                 if self.trade_manager.has_active_trade(candle.symbol):
                     break
                 try:
+                    sizing = self.position_sizer.calculate_position_size(
+                        ticker_symbol=signal.ticker_symbol,
+                        entry_price=float(signal.entry_price),
+                        stop_loss=float(signal.stop_loss),
+                        target_price=float(signal.target_price),
+                    )
+                    if not sizing.is_executable:
+                        continue
                     self.trade_manager.open_trade(
                         signal=signal,
                         entry_date=latest["timestamp"].date(),
+                        shares=sizing.shares_to_buy,
                     )
                 except ValueError:
                     # Invalid/duplicate setup must never break the live feed.

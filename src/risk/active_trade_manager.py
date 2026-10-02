@@ -24,6 +24,7 @@ class ClosedTrade:
     exit_price: float
     stop_loss: float
     target_price: float
+    invalidation_level: float
     shares: int
     holding_days: int
     exit_reason: str
@@ -152,7 +153,7 @@ class ActiveTradeManager:
         if result.is_exit_triggered:
             trade.is_open = False
             self._closed_trades[ticker_symbol] = result
-            self._closed_trade_records.append(ClosedTrade(ticker_symbol=trade.ticker_symbol, setup_type=trade.setup_type, entry_date=trade.entry_date, exit_date=evaluation_date, entry_price=trade.entry_price, exit_price=result.exit_price, stop_loss=trade.stop_loss, target_price=trade.target_price, shares=trade.shares, holding_days=result.holding_days_elapsed, exit_reason=result.exit_reason, realized_r_multiple=result.realized_r_multiple, pnl_percentage=result.pnl_percentage, pnl_inr=round((result.exit_price - trade.entry_price) * trade.shares, 2)))
+            self._closed_trade_records.append(ClosedTrade(ticker_symbol=trade.ticker_symbol, setup_type=trade.setup_type, entry_date=trade.entry_date, exit_date=evaluation_date, entry_price=trade.entry_price, exit_price=result.exit_price, stop_loss=trade.stop_loss, target_price=trade.target_price, invalidation_level=trade.invalidation_level, shares=trade.shares, holding_days=result.holding_days_elapsed, exit_reason=result.exit_reason, realized_r_multiple=result.realized_r_multiple, pnl_percentage=result.pnl_percentage, pnl_inr=round((result.exit_price - trade.entry_price) * trade.shares, 2)))
             del self._active_trades[ticker_symbol]
 
         return result

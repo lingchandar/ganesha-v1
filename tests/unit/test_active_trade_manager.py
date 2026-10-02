@@ -114,6 +114,7 @@ def test_target_exit_creates_complete_closed_trade_record():
     record = manager.closed_trade_records[-1]
     assert record.ticker_symbol == "NSE:TCS-EQ"
     assert record.exit_price == 120.0
+    assert record.invalidation_level == 95.0
     assert record.shares == 25
     assert record.holding_days == 1
     assert record.realized_r_multiple == 2.0

@@ -100,3 +100,44 @@ def test_entry_signal_is_registered_as_active_trade():
     assert trade.stop_loss == 2050.0
     assert trade.target_price == 2200.0
     assert trade.shares > 0
+
+
+def test_circuit_breaker_rejects_live_entry_when_capacity_is_full():
+    from src.setups.swing_setups import SwingSetupSignal
+
+    signal = SwingSetupSignal(
+        ticker_symbol="NSE:TCS-EQ",
+        setup_type="TREND_PULLBACK",
+        entry_price=2100.0,
+        stop_loss=2050.0,
+        target_price=2200.0,
+        risk_reward_ratio=2.0,
+        risk_per_share=50.0,
+        atr_14=20.0,
+        volume_surge_multiple=1.2,
+        delivery_ratio=0.0,
+        invalidation_level=2075.0,
+        rationale="test",
+    )
+
+    class SignalScanner:
+        def scan_all_setups(self, ticker_symbol, df):
+            return [signal]
+
+    class RejectAllCircuitBreakers:
+        @staticmethod
+        def evaluate_candidate_capacity(**kwargs):
+            class Result:
+                is_allowed = False
+            return Result()
+
+    engine = LiveAnalysisEngine(
+        min_candles=60,
+        scanner=SignalScanner(),
+        circuit_breakers=RejectAllCircuitBreakers,
+    )
+
+    for i in range(15 * 60):
+        engine.on_candle(make_candle(i))
+
+    assert not engine.trade_manager.has_active_trade("NSE:TCS-EQ")

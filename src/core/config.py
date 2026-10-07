@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from pathlib import Path
 from typing import Optional
+from sqlalchemy.engine import URL
 
 
 class GaneshaConfig(BaseSettings):
@@ -24,7 +25,7 @@ class GaneshaConfig(BaseSettings):
 
     # ── Angel One SmartAPI Credentials ──
     angel_api_key: Optional[str] = Field(default=None, description="Angel One API key")
-    angel_client_id: Optional[str] = Field(default=None, description="Angel One client/login ID")
+    angel_client_id: Optional[str] = Field(default=None, description="Angel One trading client/login ID")
     angel_password: Optional[str] = Field(default=None, description="Angel One trading password")
     angel_totp_secret: Optional[str] = Field(default=None, description="Angel One TOTP seed")
 
@@ -49,19 +50,27 @@ class GaneshaConfig(BaseSettings):
     api_max_requests_per_minute: int = Field(default=120, description="Max requests per rolling minute")
 
     @property
-    def database_url(self) -> str:
-        """Construct the SQLAlchemy-compatible PostgreSQL connection string."""
-        return (
-            f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+    def database_url(self) -> URL:
+        """Build a PostgreSQL URL safely, including passwords containing @, :, /, or other URL characters."""
+        return URL.create(
+            drivername="postgresql+psycopg2",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
         )
 
     @property
-    def async_database_url(self) -> str:
-        """Async variant of the database URL for use with asyncpg."""
-        return (
-            f"postgresql+asyncpg://{self.db_user}:{self.db_password}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+    def async_database_url(self) -> URL:
+        """Build the async PostgreSQL URL safely for asyncpg."""
+        return URL.create(
+            drivername="postgresql+asyncpg",
+            username=self.db_user,
+            password=self.db_password,
+            host=self.db_host,
+            port=self.db_port,
+            database=self.db_name,
         )
 
     model_config = {

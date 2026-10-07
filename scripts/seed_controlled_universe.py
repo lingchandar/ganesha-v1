@@ -11,9 +11,16 @@ requests use ticker_symbol (NSE:SYMBOL-EQ), never this internal token.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from pathlib import Path
+import sys
+
+# Allow direct execution from the repository's scripts/ directory:
+# `.venv/bin/python scripts/seed_controlled_universe.py`.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from src.core.database import get_db_session
 from src.ingestion.nse_index_universe import load_controlled_index_universe
@@ -105,7 +112,7 @@ def seed_controlled_universe() -> int:
                   AND effective_to IS NULL
                   AND effective_from < :today
                   AND ticker_symbol NOT IN :symbols
-            """).bindparams(__import__("sqlalchemy").bindparam("symbols", expanding=True)),
+            """).bindparams(bindparam("symbols", expanding=True)),
             {"today": today, "symbols": list(symbols)},
         )
 

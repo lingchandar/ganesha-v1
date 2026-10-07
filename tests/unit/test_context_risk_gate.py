@@ -30,8 +30,9 @@ def test_normal_context_is_allowed():
 
 
 def test_recent_large_return_blocks_trade():
-    closes = [100 + i * 0.2 for i in range(49)] + [115]
-    decision = ContextRiskGate.evaluate(_frame(closes))
+    closes = [100 + i * 0.2 for i in range(49)] + [116.5]
+    opens = closes[:-1] + [closes[-2]]
+    decision = ContextRiskGate.evaluate(_frame(closes, opens))
     assert decision.allowed is False
     assert decision.risk_level == "HIGH"
     assert "RECENT_RETURN_SHOCK" in decision.reason

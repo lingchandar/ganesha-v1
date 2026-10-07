@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from datetime import date
 from pathlib import Path
 
 from sqlalchemy import text
@@ -19,11 +18,11 @@ def main() -> int:
         universe = session.execute(
             text(
                 """
-                SELECT DISTINCT instrument_token, symbol
+                SELECT DISTINCT instrument_token, ticker_symbol
                 FROM universe_membership_history
                 WHERE universe_name = 'NSE_SWING'
-                  AND valid_to IS NULL
-                ORDER BY symbol
+                  AND effective_to IS NULL
+                ORDER BY ticker_symbol
                 """
             )
         ).mappings().all()
@@ -107,7 +106,7 @@ def main() -> int:
             ).scalar_one()
 
             print(
-                f"{item['symbol']}\t{rows['row_count']}\t"
+                f"{item['ticker_symbol']}\t{rows['row_count']}\t"
                 f"{rows['first_date']}\t{rows['last_date']}\t{gaps}"
             )
             if rows["row_count"] == 0 or gaps > 0:

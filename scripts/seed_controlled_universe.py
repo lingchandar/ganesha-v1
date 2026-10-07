@@ -5,6 +5,11 @@ BANKNIFTY constituents. This script keeps that scope separate from the legacy
 NIFTY-100 seeder and creates the point-in-time membership and sector records
 required by the backtest loader.
 
+For v1 backtesting, this is deliberately modeled as a fixed controlled
+universe beginning at the start of the available three-year candle dataset.
+This is NOT a reconstruction of historical NIFTY 50/BANKNIFTY membership.
+It avoids survivorship ambiguity while we validate the strategy pipeline.
+
 Instrument tokens are internal stable IDs for Ganesha's candle key. FYERS
 requests use ticker_symbol (NSE:SYMBOL-EQ), never this internal token.
 """
@@ -24,6 +29,11 @@ from sqlalchemy import bindparam, text
 
 from src.core.database import get_db_session
 from src.ingestion.nse_index_universe import load_controlled_index_universe
+
+# The candle backfill currently covers this three-year window. Keep the
+# controlled v1 universe active from its first historical trading date so the
+# backtest loader can resolve membership/sector data before today's seed date.
+CONTROLLED_UNIVERSE_EFFECTIVE_FROM = date(2023, 10, 9)
 
 # Broad sector labels used by the risk/backtest layers. Unknown symbols fail
 # closed into OTHER rather than preventing the 59-stock universe from loading.
@@ -103,6 +113,28 @@ def seed_controlled_universe() -> int:
         )
 
     with get_db_session() as db:
+        # Repair the original seed, which incorrectly started membership at
+        # today. Move that open-ended row to the historical start date rather
+        # than creating overlapping open-ended membership periods.
+        db.execute(
+            text("""
+                UPDATE universe_membership_history
+                SET effective_from = :start_date
+                WHERE universe_name = 'NSE_SWING'
+                  AND effective_from = :today
+                  AND effective_to IS NULL
+            """),
+            {"start_date": CONTROLLED_UNIVERSE_EFFECTIVE_FROM, "today": today},
+        )
+        db.execute(
+            text("""
+                UPDATE universe_sector_history
+                SET effective_from = :start_date
+                WHERE effective_from = :today
+            """),
+            {"start_date": CONTROLLED_UNIVERSE_EFFECTIVE_FROM, "today": today},
+        )
+
         # Close memberships that are no longer part of today's controlled set.
         db.execute(
             text("""
@@ -127,9 +159,14 @@ def seed_controlled_universe() -> int:
                         (universe_name, ticker_symbol, instrument_token, effective_from)
                     VALUES ('NSE_SWING', :ticker, :token, :effective_from)
                     ON CONFLICT (universe_name, ticker_symbol, effective_from)
-                    DO UPDATE SET instrument_token = EXCLUDED.instrument_token
+                    DO UPDATE SET instrument_token = EXCLUDED.instrument_token,
+                                  effective_to = NULL
                 """),
-                {"ticker": fyers_symbol, "token": token, "effective_from": today},
+                {
+                    "ticker": fyers_symbol,
+                    "token": token,
+                    "effective_from": CONTROLLED_UNIVERSE_EFFECTIVE_FROM,
+                },
             )
 
             db.execute(
@@ -170,11 +207,15 @@ def seed_controlled_universe() -> int:
                     "ticker": fyers_symbol,
                     "sector": sector,
                     "industry": industry,
-                    "effective_from": today,
+                    "effective_from": CONTROLLED_UNIVERSE_EFFECTIVE_FROM,
                 },
             )
 
-    logger.success("Seeded controlled Ganesha v1 universe: {} symbols", len(symbols))
+    logger.success(
+        "Seeded controlled Ganesha v1 universe: {} symbols from {}",
+        len(symbols),
+        CONTROLLED_UNIVERSE_EFFECTIVE_FROM,
+    )
     return len(symbols)
 
 

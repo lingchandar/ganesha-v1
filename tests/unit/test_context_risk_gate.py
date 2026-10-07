@@ -30,7 +30,7 @@ def test_normal_context_is_allowed():
 
 
 def test_recent_large_return_blocks_trade():
-    closes = [100 + i * 0.2 for i in range(49)] + [110]
+    closes = [100 + i * 0.2 for i in range(49)] + [115]
     decision = ContextRiskGate.evaluate(_frame(closes))
     assert decision.allowed is False
     assert decision.risk_level == "HIGH"
@@ -38,8 +38,8 @@ def test_recent_large_return_blocks_trade():
 
 
 def test_recent_large_gap_blocks_trade():
-    closes = [100 + i * 0.2 for i in range(49)] + [102]
-    opens = [100 + i * 0.2 for i in range(49)] + [107]
+    closes = [100.0] * 49 + [102.0]
+    opens = [100.0] * 49 + [107.0]
     decision = ContextRiskGate.evaluate(_frame(closes, opens))
     assert decision.allowed is False
     assert "RECENT_GAP_SHOCK" in decision.reason

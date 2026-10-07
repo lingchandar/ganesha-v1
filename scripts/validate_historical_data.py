@@ -40,11 +40,12 @@ def main() -> int:
                 """
                 SELECT COUNT(*)
                 FROM historical_daily_candles
-                WHERE open <= 0 OR high <= 0 OR low <= 0 OR close <= 0
-                   OR high < low
-                   OR high < open OR high < close
-                   OR low > open OR low > close
-                   OR volume < 0
+                WHERE open_price <= 0 OR high_price <= 0
+                   OR low_price <= 0 OR close_price <= 0
+                   OR high_price < low_price
+                   OR high_price < open_price OR high_price < close_price
+                   OR low_price > open_price OR low_price > close_price
+                   OR volume_traded < 0
                 """
             )
         ).scalar_one()

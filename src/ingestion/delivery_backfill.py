@@ -5,6 +5,10 @@ backtest delivery gate therefore needs a separate historical source. This
 module downloads each available NSE security-wise delivery bhavcopy once per
 trading date and updates only the controlled universe's existing candle rows.
 
+NSE symbols can change over time. The controlled universe intentionally uses
+current symbols, so historical delivery rows are resolved through explicit
+NSE rename aliases when the current symbol is absent from an older bhavcopy.
+
 Usage:
     .venv/bin/python -m src.ingestion.delivery_backfill
     .venv/bin/python -m src.ingestion.delivery_backfill --start-date 2023-10-09
@@ -13,8 +17,8 @@ Usage:
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime
-from typing import Iterable, List
+from datetime import date
+from typing import List
 
 from loguru import logger
 from sqlalchemy import text
@@ -29,6 +33,14 @@ UPDATE_SQL = text("""
     WHERE ticker_symbol = :ticker_symbol
       AND candle_timestamp::date = :trade_date
 """)
+
+# Current controlled-universe symbols -> historical NSE symbols.
+# These are required because the candle universe keeps the current symbol while
+# NSE delivery bhavcopies use the symbol that was valid on the trade date.
+HISTORICAL_SYMBOL_ALIASES: dict[str, tuple[str, ...]] = {
+    "ETERNAL": ("ZOMATO",),
+    "TMPV": ("TATAMOTORS",),
+}
 
 
 def _load_trade_dates(start_date: date | None, end_date: date | None) -> List[date]:
@@ -62,6 +74,42 @@ def _load_controlled_symbols() -> set[str]:
               AND effective_to IS NULL
         """)).fetchall()
     return {row.ticker_symbol.removeprefix("NSE:").removesuffix("-EQ") for row in rows}
+
+
+def _resolve_delivery_rows(df, controlled_symbols: set[str], trade_date: date):
+    """Map historical NSE symbols to the current controlled-universe symbols.
+
+    Prefer an exact current symbol. Only when it is absent do we use an
+    explicitly configured historical alias. This prevents an old alias from
+    overriding a valid current-symbol record after a rename.
+    """
+    rows = []
+    available = set(df["ticker_symbol"].astype(str))
+
+    for symbol in sorted(controlled_symbols):
+        source_symbol = symbol
+        if source_symbol not in available:
+            for alias in HISTORICAL_SYMBOL_ALIASES.get(symbol, ()):
+                if alias in available:
+                    source_symbol = alias
+                    break
+            else:
+                continue
+
+        match = df[df["ticker_symbol"] == source_symbol]
+        if match.empty:
+            continue
+        row = match.iloc[0]
+        rows.append(
+            {
+                "ticker_symbol": f"NSE:{symbol}-EQ",
+                "trade_date": trade_date,
+                "delivery_volume": int(row.delivery_volume),
+                "delivery_percentage": float(row.delivery_percentage),
+            }
+        )
+
+    return rows
 
 
 def backfill_delivery(
@@ -100,21 +148,11 @@ def backfill_delivery(
                     logger.warning("[{}/{}] {}: no NSE delivery file", index, len(trade_dates), trade_date)
                     continue
 
-                df = df[df["ticker_symbol"].isin(controlled_symbols)].copy()
-                if df.empty:
+                rows = _resolve_delivery_rows(df, controlled_symbols, trade_date)
+                if not rows:
                     missing_dates += 1
                     logger.warning("[{}/{}] {}: no controlled symbols in NSE file", index, len(trade_dates), trade_date)
                     continue
-
-                rows = [
-                    {
-                        "ticker_symbol": f"NSE:{row.ticker_symbol}-EQ",
-                        "trade_date": trade_date,
-                        "delivery_volume": int(row.delivery_volume),
-                        "delivery_percentage": float(row.delivery_percentage),
-                    }
-                    for row in df.itertuples(index=False)
-                ]
 
                 with get_db_session() as db:
                     result = db.execute(UPDATE_SQL, rows)
@@ -123,7 +161,7 @@ def backfill_delivery(
                 processed += 1
                 updated_rows += updated
                 logger.info(
-                    "[{}/{}] {}: {} NSE rows, {} candle rows updated",
+                    "[{}/{}] {}: {} resolved NSE rows, {} candle rows updated",
                     index, len(trade_dates), trade_date, len(rows), updated,
                 )
             except Exception as exc:

@@ -64,10 +64,11 @@ def train(
         raise ValueError("Both train and validation sets need both outcome classes")
 
     base = HistGradientBoostingClassifier(
-        learning_rate=0.05,
-        max_iter=250,
+        learning_rate=0.04,
+        max_iter=350,
         max_leaf_nodes=15,
-        l2_regularization=1.0,
+        min_samples_leaf=25,
+        l2_regularization=2.0,
         random_state=42,
     )
     calibration_cv = TimeSeriesSplit(n_splits=3)
@@ -111,6 +112,6 @@ def train(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="data/prediction/entry_dataset.csv")
-    parser.add_argument("--model", default="models/entry_prediction_v1.joblib")
+    parser.add_argument("--model", default="models/entry_prediction_v2.joblib")
     args = parser.parse_args()
     train(Path(args.dataset), Path(args.model))

@@ -9,8 +9,8 @@ import joblib
 import pandas as pd
 
 
-MODEL_VERSION = "entry_v2"
-DEFAULT_MODEL_PATH = Path("models/entry_prediction_v2.joblib")
+MODEL_VERSION = "entry_v3"
+DEFAULT_MODEL_PATH = Path("models/entry_prediction_v3.joblib")
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,9 @@ class PredictionFeatureBuilder:
         "atr_pct",
         "atr_expansion_ratio",
         "volume_surge_multiple",
+        "risk_reward_ratio",
+        "distance_to_stop_atr",
+        "distance_to_target_atr",
         "price_vs_ema20_pct",
         "price_vs_ema50_pct",
         "price_vs_ema200_pct",
@@ -66,6 +69,12 @@ class PredictionFeatureBuilder:
         ema20 = float(latest.get("ema_20", close))
         ema50 = float(latest.get("ema_50", close))
         ema200 = float(latest.get("ema_200", close))
+
+        entry = float(_signal_value(signal, "entry_price", close))
+        stop = float(_signal_value(signal, "stop_loss", entry))
+        target = float(_signal_value(signal, "target_price", entry))
+        risk = max(entry - stop, 0.0)
+        reward = max(target - entry, 0.0)
 
         close_series = pd.to_numeric(df_features["close_price"], errors="coerce")
         ret5 = float(close_series.pct_change(5).iloc[-1]) if len(close_series) > 5 else 0.0
@@ -97,9 +106,10 @@ class PredictionFeatureBuilder:
             "rsi_change_5d": rsi_change_5d,
             "atr_pct": atr / close,
             "atr_expansion_ratio": atr_expansion_ratio,
-            "volume_surge_multiple": float(
-                _signal_value(signal, "volume_surge_multiple", 1.0)
-            ),
+            "volume_surge_multiple": float(_signal_value(signal, "volume_surge_multiple", 1.0)),
+            "risk_reward_ratio": reward / risk if risk > 0 else 0.0,
+            "distance_to_stop_atr": risk / atr,
+            "distance_to_target_atr": reward / atr,
             "price_vs_ema20_pct": (close / ema20) - 1.0 if ema20 else 0.0,
             "price_vs_ema50_pct": (close / ema50) - 1.0 if ema50 else 0.0,
             "price_vs_ema200_pct": (close / ema200) - 1.0 if ema200 else 0.0,
@@ -113,9 +123,7 @@ class PredictionFeatureBuilder:
             "plus_di_minus_di": plus_di - minus_di,
             "macd_hist_pct": macd_hist / close,
             "macd_hist_diff_pct": macd_hist_diff / close,
-            "setup_class": float(
-                _setup_id(str(_signal_value(signal, "setup_type", "")))
-            ),
+            "setup_class": float(_setup_id(str(_signal_value(signal, "setup_type", "")))),
         }
         return pd.DataFrame([row], columns=cls.FEATURE_COLUMNS)
 

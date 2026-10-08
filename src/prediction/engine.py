@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import joblib
 import pandas as pd
@@ -23,6 +23,13 @@ class PredictionResult:
     reason: str
 
 
+def _signal_value(signal: Any, name: str, default: Any = None) -> Any:
+    """Read a signal field from either a dict or SwingSetupSignal-like object."""
+    if isinstance(signal, dict):
+        return signal.get(name, default)
+    return getattr(signal, name, default)
+
+
 class PredictionFeatureBuilder:
     """Build features using only data known at the signal timestamp."""
 
@@ -34,7 +41,7 @@ class PredictionFeatureBuilder:
     ]
 
     @classmethod
-    def build(cls, signal: Dict, df_features: pd.DataFrame) -> pd.DataFrame:
+    def build(cls, signal: Any, df_features: pd.DataFrame) -> pd.DataFrame:
         if df_features.empty:
             raise ValueError("Feature frame cannot be empty")
         latest = df_features.iloc[-1]
@@ -49,10 +56,10 @@ class PredictionFeatureBuilder:
         row = {
             "rsi_14": float(latest.get("rsi_14", 50.0)),
             "atr_pct": atr / close,
-            "volume_surge_multiple": float(signal.get("volume_surge_multiple", 1.0)),
-            "risk_reward_ratio": float(signal.get("risk_reward_ratio", 0.0)),
-            "distance_to_stop_atr": (close - float(signal["stop_loss"])) / atr,
-            "distance_to_target_atr": (float(signal["target_price"]) - close) / atr,
+            "volume_surge_multiple": float(_signal_value(signal, "volume_surge_multiple", 1.0)),
+            "risk_reward_ratio": float(_signal_value(signal, "risk_reward_ratio", 0.0)),
+            "distance_to_stop_atr": (close - float(_signal_value(signal, "stop_loss"))) / atr,
+            "distance_to_target_atr": (float(_signal_value(signal, "target_price")) - close) / atr,
             "price_vs_ema20_pct": (close / ema20) - 1.0 if ema20 else 0.0,
             "price_vs_ema50_pct": (close / ema50) - 1.0 if ema50 else 0.0,
             "ema20_vs_ema50_pct": (ema20 / ema50) - 1.0 if ema50 else 0.0,
@@ -60,7 +67,7 @@ class PredictionFeatureBuilder:
             "return_5d": ret5,
             "return_20d": ret20,
             "volatility_20d": vol20,
-            "setup_class": float(_setup_id(str(signal.get("setup_type", "")))),
+            "setup_class": float(_setup_id(str(_signal_value(signal, "setup_type", "")))),
         }
         return pd.DataFrame([row], columns=cls.FEATURE_COLUMNS)
 
@@ -101,7 +108,7 @@ class EntryPredictionEngine:
         if "model" not in self._bundle:
             raise ValueError("Prediction model bundle has no model")
 
-    def predict(self, signal: Dict, df_features: pd.DataFrame) -> PredictionResult:
+    def predict(self, signal: Any, df_features: pd.DataFrame) -> PredictionResult:
         if not self.available:
             return PredictionResult(False, None, None, None, None, "MODEL_NOT_TRAINED")
         features = PredictionFeatureBuilder.build(signal, df_features)

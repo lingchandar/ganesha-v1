@@ -137,5 +137,4 @@ def build_dataset(
         .agg(["count", "mean"])
         .sort_values("count", ascending=False)
         .to_string()
-    )
     return output

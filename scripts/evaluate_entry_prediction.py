@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 DATASET = Path("data/prediction/entry_dataset.csv")
-MODEL = Path("models/entry_prediction_v1.joblib")
+MODEL = Path("models/entry_prediction_v2.joblib")
 LABEL = "label_target_before_stop"
 THRESHOLDS = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
 
@@ -21,17 +21,25 @@ def main() -> None:
     validation = validation.sort_values(["trade_date", "ticker_symbol", "setup_type"])
 
     features = bundle["feature_columns"]
+    missing = [column for column in features if column not in validation.columns]
+    if missing:
+        raise ValueError(f"Validation dataset missing model features: {missing}")
+
     probabilities = bundle["model"].predict_proba(validation[features])[:, 1]
     validation["prediction_probability"] = probabilities
     y = validation[LABEL].astype(int)
 
     print("=== ENTRY PREDICTION VALIDATION ===")
+    print(f"model_version={bundle.get('model_version', 'unknown')}")
     print(f"validation_rows={len(validation)}")
     print(f"validation_dates={validation['trade_date'].min().date()} to {validation['trade_date'].max().date()}")
     print(f"positive_rate={y.mean():.4f}")
     print(f"auc={roc_auc_score(y, probabilities):.4f}")
     print(f"average_precision={average_precision_score(y, probabilities):.4f}")
     print(f"brier_score={brier_score_loss(y, probabilities):.4f}")
+    print(f"probability_min={probabilities.min():.6f}")
+    print(f"probability_max={probabilities.max():.6f}")
+    print(f"probability_mean={probabilities.mean():.6f}")
 
     print("\n=== THRESHOLD ANALYSIS ===")
     print("threshold signals coverage success_rate avg_R total_R precision")

@@ -32,12 +32,7 @@ def _label_outcome(
     signal,
     horizon: int = 15,
 ) -> Optional[int]:
-    """Return 1 when target is reached before stop, otherwise 0.
-
-    The future window starts strictly after the signal candle. This keeps the
-    label point-in-time safe and avoids using the entry candle to determine
-    the outcome.
-    """
+    """Return 1 when target is reached before stop, otherwise 0."""
     risk = signal.entry_price - signal.stop_loss
     if risk <= 0:
         return None

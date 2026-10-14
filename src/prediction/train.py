@@ -64,11 +64,11 @@ def train(
         raise ValueError("Both train and validation sets need both outcome classes")
 
     base = HistGradientBoostingClassifier(
-        learning_rate=0.04,
-        max_iter=350,
+        learning_rate=0.035,
+        max_iter=400,
         max_leaf_nodes=15,
-        min_samples_leaf=25,
-        l2_regularization=2.0,
+        min_samples_leaf=30,
+        l2_regularization=2.5,
         random_state=42,
     )
     calibration_cv = TimeSeriesSplit(n_splits=3)
@@ -79,6 +79,7 @@ def train(
     auc = roc_auc_score(valid_df[LABEL_COLUMN], probabilities)
     ap = average_precision_score(valid_df[LABEL_COLUMN], probabilities)
 
+    print(f"model_version={MODEL_VERSION}")
     print(f"train_rows={len(train_df)} validation_rows={len(valid_df)}")
     print(
         "train_dates="
@@ -112,6 +113,6 @@ def train(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="data/prediction/entry_dataset.csv")
-    parser.add_argument("--model", default="models/entry_prediction_v3.joblib")
+    parser.add_argument("--model", default="models/entry_prediction_v4.joblib")
     args = parser.parse_args()
     train(Path(args.dataset), Path(args.model))

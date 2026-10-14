@@ -8,9 +8,9 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 DATASET = Path("data/prediction/entry_dataset.csv")
-MODEL = Path("models/entry_prediction_v2.joblib")
+MODEL = Path("models/entry_prediction_v3.joblib")
 LABEL = "label_target_before_stop"
-THRESHOLDS = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
+THRESHOLDS = [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
 
 
 def main() -> None:
@@ -41,7 +41,7 @@ def main() -> None:
     print(f"probability_max={probabilities.max():.6f}")
     print(f"probability_mean={probabilities.mean():.6f}")
 
-    print("\n=== THRESHOLD ANALYSIS ===")
+    print("\n=== THRESHOLD ANALYSIS (DIAGNOSTIC ONLY) ===")
     print("threshold signals coverage success_rate avg_R total_R precision")
     for threshold in THRESHOLDS:
         accepted = validation[validation["prediction_probability"] >= threshold]
@@ -54,10 +54,10 @@ def main() -> None:
         coverage = len(accepted) / len(validation)
         print(f"{threshold:.2f} {len(accepted)} {coverage:.4f} {success_rate:.4f} {avg_r:.4f} {total_r:.2f} {success_rate:.4f}")
 
-    print("\n=== SETUP PERFORMANCE AT THRESHOLD 0.60 ===")
-    accepted = validation[validation["prediction_probability"] >= 0.60]
+    print("\n=== SETUP PERFORMANCE AT DIAGNOSTIC THRESHOLD 0.30 ===")
+    accepted = validation[validation["prediction_probability"] >= 0.30]
     if accepted.empty:
-        print("No validation signals passed threshold 0.60")
+        print("No validation signals passed threshold 0.30")
     else:
         setup_stats = (
             accepted.groupby("setup_type")[LABEL]

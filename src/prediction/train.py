@@ -112,6 +112,6 @@ def train(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="data/prediction/entry_dataset.csv")
-    parser.add_argument("--model", default="models/entry_prediction_v2.joblib")
+    parser.add_argument("--model", default="models/entry_prediction_v3.joblib")
     args = parser.parse_args()
     train(Path(args.dataset), Path(args.model))

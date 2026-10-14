@@ -1,6 +1,7 @@
 """Build an entry-prediction dataset aligned with real next-day backtest fills."""
 from __future__ import annotations
 
+import argparse
 from datetime import date
 from pathlib import Path
 from typing import List, Optional
@@ -256,3 +257,26 @@ def build_fill_aware_dataset(
     print(f"dataset_output={output}")
     print(f"audit_output={audit_output}")
     return output, audit_output
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, default=Path("data/prediction/entry_dataset_v5.csv"))
+    parser.add_argument(
+        "--audit-output",
+        type=Path,
+        default=Path("data/prediction/prediction_fill_aware_audit_v5.csv"),
+    )
+    parser.add_argument("--start-date", type=date.fromisoformat, default=None)
+    parser.add_argument("--end-date", type=date.fromisoformat, default=None)
+    args = parser.parse_args()
+    build_fill_aware_dataset(
+        output_path=args.output,
+        audit_path=args.audit_output,
+        start_date=args.start_date,
+        end_date=args.end_date,
+    )
+
+
+if __name__ == "__main__":
+    main()

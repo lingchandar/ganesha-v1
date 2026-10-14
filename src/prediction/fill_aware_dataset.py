@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.backtest.data_loader import HistoricalDataLoader
 from src.indicators.technical_indicators import TechnicalAnalysisEngine
+from src.ingestion.expiry_calendar import NSEDerivativeExpiryFilter
 from src.prediction.engine import PredictionFeatureBuilder
 from src.prediction.trade_eligibility import evaluate_signal_eligibility
 from src.risk.exit_engine import PrecisionExitEngine
@@ -115,12 +116,10 @@ def _evaluate_trade(
     if max_high == float("-inf") or min_low == float("inf"):
         return None
 
-    mfe_r = (max_high - fill_price) / risk
-    mae_r = (min_low - fill_price) / risk
     return {
         "label_target_before_stop": int(exit_label),
-        "mfe_r_15": round(float(mfe_r), 4),
-        "mae_r_15": round(float(mae_r), 4),
+        "mfe_r_15": round(float((max_high - fill_price) / risk), 4),
+        "mae_r_15": round(float((min_low - fill_price) / risk), 4),
         "holding_days_15": int(holding_days),
     }
 
@@ -133,6 +132,7 @@ def build_fill_aware_dataset(
 ) -> tuple[Path, Path]:
     loader = HistoricalDataLoader()
     loader.load_data(start_date=start_date, end_date=end_date)
+    expiry_filter = NSEDerivativeExpiryFilter()
 
     rows: List[dict] = []
     audit_rows: List[dict] = []
@@ -141,7 +141,7 @@ def build_fill_aware_dataset(
     eligible_signal_count = 0
     fill_count = 0
     invalid_fill_count = 0
-    rejected_by_gate = {}
+    rejected_by_gate: dict[str, int] = {}
 
     for ticker, raw in loader.stock_candles.items():
         if len(raw) < 160:
@@ -154,12 +154,9 @@ def build_fill_aware_dataset(
             signal_date = pd.Timestamp(features_all.index[i]).date()
             window = features_all.iloc[: i + 1]
 
-            # Reuse the exact point-in-time candidate data used by the backtest.
-            # This supplies delivery history, sector history and NIFTY history
-            # without exposing any future rows.
             nifty_slice, candidate_data = loader.get_point_in_time_slice(
                 as_of_date=signal_date,
-                min_bars_required=loader.MIN_BARS_REQUIRED if hasattr(loader, "MIN_BARS_REQUIRED") else 30,
+                min_bars_required=30,
             )
             ticker_data = candidate_data.get(ticker)
             if ticker_data is None:
@@ -167,11 +164,9 @@ def build_fill_aware_dataset(
             ticker_data = dict(ticker_data)
             ticker_data["ticker_symbol"] = ticker
 
-            is_expiry_week = loader.get_point_in_time_slice  # replaced below by actual expiry lookup
-            # The expiry filter is deterministic from the signal date.
-            from src.ingestion.expiry_calendar import NSEDerivativeExpiryFilter
-            expiry_week = NSEDerivativeExpiryFilter().is_expiry_week_active(signal_date).get("is_expiry_week", False)
-
+            expiry_week = expiry_filter.is_expiry_week_active(signal_date).get(
+                "is_expiry_week", False
+            )
             signals = _candidate_signals(ticker, window, expiry_week)
             candidate_count += len(signals)
             if not signals:

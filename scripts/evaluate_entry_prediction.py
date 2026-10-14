@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
 DATASET = Path("data/prediction/entry_dataset.csv")
-MODEL = Path("models/entry_prediction_v3.joblib")
+MODEL = Path("models/entry_prediction_v4.joblib")
 LABEL = "label_target_before_stop"
 THRESHOLDS = [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
 

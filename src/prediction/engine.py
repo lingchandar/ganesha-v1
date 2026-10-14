@@ -9,8 +9,17 @@ import joblib
 import pandas as pd
 
 
-MODEL_VERSION = "entry_v3"
-DEFAULT_MODEL_PATH = Path("models/entry_prediction_v3.joblib")
+MODEL_VERSION = "entry_v4"
+DEFAULT_MODEL_PATH = Path("models/entry_prediction_v4.joblib")
+
+SETUP_TYPES = (
+    "CLASSIC_RESISTANCE_BREAKOUT",
+    "BREAKOUT_RETEST",
+    "TREND_PULLBACK",
+    "DEMAND_SUPPORT_BOUNCE",
+    "TREND_CONTINUATION_FLAG",
+    "RS_LEADER_BREAKOUT",
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +42,7 @@ def _signal_value(signal: Any, name: str, default: Any = None) -> Any:
 class PredictionFeatureBuilder:
     """Build features using only data known at the signal timestamp."""
 
-    FEATURE_COLUMNS = [
+    NUMERIC_FEATURE_COLUMNS = [
         "rsi_14",
         "rsi_change_5d",
         "atr_pct",
@@ -55,8 +64,9 @@ class PredictionFeatureBuilder:
         "plus_di_minus_di",
         "macd_hist_pct",
         "macd_hist_diff_pct",
-        "setup_class",
     ]
+    SETUP_FEATURE_COLUMNS = [f"setup_{setup.lower()}" for setup in SETUP_TYPES]
+    FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + SETUP_FEATURE_COLUMNS
 
     @classmethod
     def build(cls, signal: Any, df_features: pd.DataFrame) -> pd.DataFrame:
@@ -101,6 +111,10 @@ class PredictionFeatureBuilder:
         plus_di = float(latest.get("plus_di", 0.0))
         minus_di = float(latest.get("minus_di", 0.0))
 
+        setup_type = str(_signal_value(signal, "setup_type", ""))
+        if setup_type not in SETUP_TYPES:
+            raise ValueError(f"Unsupported setup type for prediction: {setup_type}")
+
         row = {
             "rsi_14": float(latest.get("rsi_14", 50.0)),
             "rsi_change_5d": rsi_change_5d,
@@ -123,21 +137,9 @@ class PredictionFeatureBuilder:
             "plus_di_minus_di": plus_di - minus_di,
             "macd_hist_pct": macd_hist / close,
             "macd_hist_diff_pct": macd_hist_diff / close,
-            "setup_class": float(_setup_id(str(_signal_value(signal, "setup_type", "")))),
         }
+        row.update({column: float(column == f"setup_{setup_type.lower()}") for column in cls.SETUP_FEATURE_COLUMNS})
         return pd.DataFrame([row], columns=cls.FEATURE_COLUMNS)
-
-
-def _setup_id(name: str) -> int:
-    mapping = {
-        "CLASSIC_RESISTANCE_BREAKOUT": 0,
-        "BREAKOUT_RETEST": 1,
-        "TREND_PULLBACK": 2,
-        "DEMAND_SUPPORT_BOUNCE": 3,
-        "TREND_CONTINUATION_FLAG": 4,
-        "RS_LEADER_BREAKOUT": 5,
-    }
-    return mapping.get(name, -1)
 
 
 class EntryPredictionEngine:

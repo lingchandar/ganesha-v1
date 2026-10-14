@@ -11,6 +11,7 @@ import pandas as pd
 from src.backtest.data_loader import HistoricalDataLoader
 from src.indicators.technical_indicators import TechnicalAnalysisEngine
 from src.prediction.engine import PredictionFeatureBuilder
+from src.prediction.trade_eligibility import evaluate_signal_eligibility
 from src.risk.exit_engine import PrecisionExitEngine
 from src.setups.swing_setups import SwingSetupScanner
 
@@ -25,14 +26,15 @@ SETUP_METHODS = (
 )
 
 
-def _candidate_signals(ticker: str, window: pd.DataFrame):
+def _candidate_signals(ticker: str, window: pd.DataFrame, is_expiry_week: bool):
+    """Match the six core setup methods used by SwingSetupScanner."""
     signals = []
     for method in SETUP_METHODS:
         if method in (
             SwingSetupScanner._check_classic_breakout,
             SwingSetupScanner._check_breakout_retest,
         ):
-            signal = method(ticker, window, False)
+            signal = method(ticker, window, is_expiry_week)
         else:
             signal = method(ticker, window)
         if signal is not None:
@@ -136,8 +138,10 @@ def build_fill_aware_dataset(
     audit_rows: List[dict] = []
     candidate_count = 0
     top_signal_count = 0
+    eligible_signal_count = 0
     fill_count = 0
     invalid_fill_count = 0
+    rejected_by_gate = {}
 
     for ticker, raw in loader.stock_candles.items():
         if len(raw) < 160:
@@ -149,7 +153,26 @@ def build_fill_aware_dataset(
         for i in range(120, len(features_all) - 15):
             signal_date = pd.Timestamp(features_all.index[i]).date()
             window = features_all.iloc[: i + 1]
-            signals = _candidate_signals(ticker, window)
+
+            # Reuse the exact point-in-time candidate data used by the backtest.
+            # This supplies delivery history, sector history and NIFTY history
+            # without exposing any future rows.
+            nifty_slice, candidate_data = loader.get_point_in_time_slice(
+                as_of_date=signal_date,
+                min_bars_required=loader.MIN_BARS_REQUIRED if hasattr(loader, "MIN_BARS_REQUIRED") else 30,
+            )
+            ticker_data = candidate_data.get(ticker)
+            if ticker_data is None:
+                continue
+            ticker_data = dict(ticker_data)
+            ticker_data["ticker_symbol"] = ticker
+
+            is_expiry_week = loader.get_point_in_time_slice  # replaced below by actual expiry lookup
+            # The expiry filter is deterministic from the signal date.
+            from src.ingestion.expiry_calendar import NSEDerivativeExpiryFilter
+            expiry_week = NSEDerivativeExpiryFilter().is_expiry_week_active(signal_date).get("is_expiry_week", False)
+
+            signals = _candidate_signals(ticker, window, expiry_week)
             candidate_count += len(signals)
             if not signals:
                 continue
@@ -158,6 +181,28 @@ def build_fill_aware_dataset(
             signal = signals[0]
             top_signal_count += 1
 
+            eligibility = evaluate_signal_eligibility(
+                signal=signal,
+                candidate_data=ticker_data,
+                nifty_slice=nifty_slice,
+                is_expiry_week=expiry_week,
+                min_reward_risk=2.0,
+                enable_regime_filter=True,
+                enable_rs_filter=True,
+            )
+            if not eligibility.eligible:
+                rejected_by_gate[eligibility.reason] = rejected_by_gate.get(eligibility.reason, 0) + 1
+                audit_rows.append({
+                    "ticker_symbol": ticker,
+                    "signal_date": signal_date,
+                    "setup_type": signal.setup_type,
+                    "status": eligibility.reason,
+                    "signal_entry_price": float(signal.entry_price),
+                    "risk_reward_ratio": eligibility.risk_reward_ratio,
+                })
+                continue
+
+            eligible_signal_count += 1
             fill = _next_day_fill(raw, signal_date, float(signal.entry_price))
             if fill is None:
                 audit_rows.append({
@@ -166,6 +211,7 @@ def build_fill_aware_dataset(
                     "setup_type": signal.setup_type,
                     "status": "NO_NEXT_DAY_FILL",
                     "signal_entry_price": float(signal.entry_price),
+                    "risk_reward_ratio": eligibility.risk_reward_ratio,
                 })
                 continue
 
@@ -181,6 +227,7 @@ def build_fill_aware_dataset(
                     "status": "INVALID_FILL_RISK",
                     "signal_entry_price": float(signal.entry_price),
                     "actual_fill_price": float(fill_price),
+                    "risk_reward_ratio": eligibility.risk_reward_ratio,
                 })
                 continue
 
@@ -198,6 +245,7 @@ def build_fill_aware_dataset(
                 ),
                 "stop_loss": round(float(signal.stop_loss), 4),
                 "target_price": round(float(signal.target_price), 4),
+                "risk_reward_ratio_backtest": round(float(eligibility.risk_reward_ratio), 4),
                 **outcome,
             })
             rows.append(feature_row)
@@ -208,11 +256,12 @@ def build_fill_aware_dataset(
                 "status": "FILLED_AND_LABELED",
                 "signal_entry_price": float(signal.entry_price),
                 "actual_fill_price": float(fill_price),
+                "risk_reward_ratio": eligibility.risk_reward_ratio,
                 "label_target_before_stop": outcome["label_target_before_stop"],
             })
 
     if not rows:
-        raise RuntimeError("Fill-aware prediction dataset produced zero training rows")
+        raise RuntimeError("Trade-eligible prediction dataset produced zero training rows")
 
     frame = pd.DataFrame(rows).sort_values(
         ["trade_date", "ticker_symbol", "setup_type"]
@@ -220,14 +269,14 @@ def build_fill_aware_dataset(
 
     feature_columns = PredictionFeatureBuilder.FEATURE_COLUMNS
     if frame[feature_columns].isna().any().any():
-        raise ValueError("Fill-aware prediction dataset contains NaN feature values")
+        raise ValueError("Trade-eligible prediction dataset contains NaN feature values")
 
     duplicate_keys = frame.duplicated(
         subset=["ticker_symbol", "trade_date"],
         keep=False,
     )
     if duplicate_keys.any():
-        raise ValueError("Fill-aware dataset contains duplicate ticker/date examples")
+        raise ValueError("Trade-eligible dataset contains duplicate ticker/date examples")
 
     output = Path(output_path)
     audit_output = Path(audit_path)
@@ -238,16 +287,17 @@ def build_fill_aware_dataset(
 
     positive = int(frame["label_target_before_stop"].sum())
     print(
-        "fill_aware_prediction_dataset="
+        "trade_eligible_prediction_dataset="
         f"rows={len(frame)} candidates={candidate_count} "
-        f"top_signals={top_signal_count} fills={fill_count} "
-        f"invalid_fills={invalid_fill_count} positive={positive} "
-        f"negative={len(frame) - positive} "
-        f"positive_rate={positive / len(frame):.4f} "
+        f"top_signals={top_signal_count} eligible_signals={eligible_signal_count} "
+        f"fills={fill_count} invalid_fills={invalid_fill_count} positive={positive} "
+        f"negative={len(frame) - positive} positive_rate={positive / len(frame):.4f} "
         f"tickers={frame['ticker_symbol'].nunique()} "
         f"start={frame['trade_date'].min()} end={frame['trade_date'].max()}"
     )
-    print("fill_aware_dataset_by_setup:")
+    print("rejected_by_gate:")
+    print(pd.Series(rejected_by_gate).sort_values(ascending=False).to_string() if rejected_by_gate else "none")
+    print("trade_eligible_dataset_by_setup:")
     print(
         frame.groupby("setup_type")["label_target_before_stop"]
         .agg(["count", "mean"])

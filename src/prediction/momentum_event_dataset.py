@@ -63,6 +63,27 @@ def _relative_strength(stock: pd.Series, benchmark: Optional[pd.Series], periods
     return 0.0 if pd.isna(a) or pd.isna(b) else float(a - b)
 
 
+def _first_barrier(raw: pd.DataFrame, index: int, horizon: int, up_level: float, down_level: float) -> tuple[Optional[str], Optional[int]]:
+    """Return the first barrier touched in later sessions.
+
+    Daily OHLC cannot establish whether the high or low happened first inside
+    the same candle. When both are touched on one session we conservatively
+    treat the adverse/down barrier as first.
+    """
+    end = min(len(raw), index + 1 + horizon)
+    for future_idx in range(index + 1, end):
+        high = _safe_float(raw.iloc[future_idx]["high"])
+        low = _safe_float(raw.iloc[future_idx]["low"])
+        day = future_idx - index
+        hit_up = high >= up_level
+        hit_down = low <= down_level
+        if hit_up or hit_down:
+            if hit_down:
+                return "down", day
+            return "up", day
+    return None, None
+
+
 def _triple_barrier_outcome(raw: pd.DataFrame, index: int, horizon: int,
                             up_atr: float = UP_BARRIER_ATR,
                             down_atr: float = DOWN_BARRIER_ATR) -> dict:
@@ -82,46 +103,34 @@ def _triple_barrier_outcome(raw: pd.DataFrame, index: int, horizon: int,
     up_level = close + atr * up_atr
     down_level = close - risk
     result = dict(base, outcome_valid=1)
-    max_high = close
-    min_low = close
-    state5 = None
-    state10 = None
-    day_up5 = None
-    day_up10 = None
-    end = min(len(raw), index + 1 + horizon)
 
-    for future_idx in range(index + 1, end):
-        row = raw.iloc[future_idx]
-        high = _safe_float(row["high"])
-        low = _safe_float(row["low"])
-        day = future_idx - index
-        max_high = max(max_high, high)
-        min_low = min(min_low, low)
-
-        if state10 is None and (high >= up_level or low <= down_level):
-            state10 = "down" if low <= down_level else "up"
-            if state10 == "up":
-                day_up10 = day
-        if horizon >= HORIZON_5 and day <= HORIZON_5 and state5 is None and (high >= up_level or low <= down_level):
-            state5 = "down" if low <= down_level else "up"
-            if state5 == "up":
-                day_up5 = day
+    state5, day_up5 = _first_barrier(raw, index, min(horizon, HORIZON_5), up_level, down_level)
+    state10, day_up10 = _first_barrier(raw, index, min(horizon, HORIZON_10), up_level, down_level)
 
     max_high5 = close
     min_low5 = close
-    for future_idx in range(index + 1, min(len(raw), index + 1 + HORIZON_5)):
-        max_high5 = max(max_high5, _safe_float(raw.iloc[future_idx]["high"]))
-        min_low5 = min(min_low5, _safe_float(raw.iloc[future_idx]["low"]))
+    max_high10 = close
+    min_low10 = close
+    end5 = min(len(raw), index + 1 + HORIZON_5)
+    end10 = min(len(raw), index + 1 + HORIZON_10)
+    for future_idx in range(index + 1, end10):
+        high = _safe_float(raw.iloc[future_idx]["high"])
+        low = _safe_float(raw.iloc[future_idx]["low"])
+        max_high10 = max(max_high10, high)
+        min_low10 = min(min_low10, low)
+        if future_idx < end5:
+            max_high5 = max(max_high5, high)
+            min_low5 = min(min_low5, low)
 
     result.update({
         "hit_up_before_down_5d": int(state5 == "up"),
         "hit_up_before_down_10d": int(state10 == "up"),
         "mfe_r_5d": (max_high5 - close) / risk,
         "mae_r_5d": (min_low5 - close) / risk,
-        "mfe_r_10d": (max_high - close) / risk,
-        "mae_r_10d": (min_low - close) / risk,
-        "days_to_up_5d": int(day_up5 or 0),
-        "days_to_up_10d": int(day_up10 or 0),
+        "mfe_r_10d": (max_high10 - close) / risk,
+        "mae_r_10d": (min_low10 - close) / risk,
+        "days_to_up_5d": int(day_up5 or 0) if state5 == "up" else 0,
+        "days_to_up_10d": int(day_up10 or 0) if state10 == "up" else 0,
     })
     return result
 
@@ -180,27 +189,33 @@ def build_momentum_event_dataset(output_path: Path | str = "data/prediction/mome
     loader = HistoricalDataLoader()
     loader.load_data(start_date=start_date, end_date=end_date)
     rows: list[dict] = []
+
     for ticker, raw_original in loader.stock_candles.items():
         if len(raw_original) < 220:
             continue
         raw = raw_original.copy()
         features = TechnicalAnalysisEngine.compute_all_features(raw.reset_index())
         features.index = raw.index
-        # ATR is a feature-time value and is copied onto raw solely for outcome normalization.
-        raw["atr_14"] = pd.to_numeric(features["atr_14"], errors="coerce")
         sector = loader.ticker_sectors.get(ticker)
         sector_series = loader.sector_series.get(sector)
+
         for index in range(200, len(raw) - HORIZON_10):
             as_of_date = pd.Timestamp(raw.index[index]).date()
             nifty_slice, candidate_data = loader.get_point_in_time_slice(as_of_date, min_bars_required=30)
             if ticker not in candidate_data:
                 continue
-            row = _build_feature_row(raw, features, index, nifty_slice, sector_series)
-            row.update({"ticker_symbol": ticker, "trade_date": as_of_date, "sector": sector or "UNKNOWN"})
-            row.update(_triple_barrier_outcome(raw, index, HORIZON_5))
-            outcome10 = _triple_barrier_outcome(raw, index, HORIZON_10)
-            row.update({k: outcome10[k] for k in ("hit_up_before_down_10d", "mfe_r_10d", "mae_r_10d", "days_to_up_10d")})
-            rows.append(row)
+            feature_row = _build_feature_row(raw, features, index, nifty_slice, sector_series)
+            outcome_5 = _triple_barrier_outcome(raw, index, HORIZON_5)
+            outcome_10 = _triple_barrier_outcome(raw, index, HORIZON_10)
+            feature_row.update({
+                "ticker_symbol": ticker, "trade_date": as_of_date, "sector": sector or "UNKNOWN",
+                **outcome_5,
+                "hit_up_before_down_10d": outcome_10["hit_up_before_down_10d"],
+                "mfe_r_10d": outcome_10["mfe_r_10d"], "mae_r_10d": outcome_10["mae_r_10d"],
+                "days_to_up_10d": outcome_10["days_to_up_10d"],
+            })
+            rows.append(feature_row)
+
     if not rows:
         raise RuntimeError("Momentum event dataset produced zero rows")
     frame = pd.DataFrame(rows).sort_values(["trade_date", "ticker_symbol"]).reset_index(drop=True)
@@ -212,9 +227,14 @@ def build_momentum_event_dataset(output_path: Path | str = "data/prediction/mome
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(output, index=False)
-    positive5 = int(frame["hit_up_before_down_5d"].sum())
-    positive10 = int(frame["hit_up_before_down_10d"].sum())
-    print(f"momentum_event_dataset=rows={len(frame)} tickers={frame['ticker_symbol'].nunique()} start={frame['trade_date'].min()} end={frame['trade_date'].max()} positive_5d={positive5} rate_5d={positive5/len(frame):.4f} positive_10d={positive10} rate_10d={positive10/len(frame):.4f} delivery_available={frame['delivery_available'].mean():.4f}")
+    positive_5 = int(frame["hit_up_before_down_5d"].sum())
+    positive_10 = int(frame["hit_up_before_down_10d"].sum())
+    print(
+        "momentum_event_dataset="
+        f"rows={len(frame)} tickers={frame['ticker_symbol'].nunique()} start={frame['trade_date'].min()} end={frame['trade_date'].max()} "
+        f"positive_5d={positive_5} rate_5d={positive_5 / len(frame):.4f} positive_10d={positive_10} rate_10d={positive_10 / len(frame):.4f} "
+        f"delivery_available={frame['delivery_available'].mean():.4f}"
+    )
     print(f"dataset_output={output}")
     return output
 

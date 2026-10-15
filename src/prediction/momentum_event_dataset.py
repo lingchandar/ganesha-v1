@@ -86,10 +86,20 @@ def _first_barrier(raw: pd.DataFrame, index: int, horizon: int, up_level: float,
 
 def _triple_barrier_outcome(raw: pd.DataFrame, index: int, horizon: int,
                             up_atr: float = UP_BARRIER_ATR,
-                            down_atr: float = DOWN_BARRIER_ATR) -> dict:
-    """Measure future opportunity without using any future value as a feature."""
+                            down_atr: float = DOWN_BARRIER_ATR,
+                            atr_value: Optional[float] = None) -> dict:
+    """Measure future opportunity without using any future value as a feature.
+
+    ``atr_value`` is the ATR computed from the feature frame at the event
+    timestamp. It is preferred for production dataset generation because the
+    raw OHLCV frame does not contain indicator columns. The raw ``atr_14``
+    fallback remains for backwards-compatible unit tests.
+    """
     close = _safe_float(raw.iloc[index]["close"])
-    atr = _safe_float(raw.iloc[index].get("atr_14"), 0.0)
+    if atr_value is None:
+        atr = _safe_float(raw.iloc[index].get("atr_14"), 0.0)
+    else:
+        atr = _safe_float(atr_value, 0.0)
     base = {
         "outcome_valid": 0, "hit_up_before_down_5d": 0,
         "hit_up_before_down_10d": 0, "mfe_r_5d": 0.0, "mae_r_5d": 0.0,
@@ -205,8 +215,9 @@ def build_momentum_event_dataset(output_path: Path | str = "data/prediction/mome
             if ticker not in candidate_data:
                 continue
             feature_row = _build_feature_row(raw, features, index, nifty_slice, sector_series)
-            outcome_5 = _triple_barrier_outcome(raw, index, HORIZON_5)
-            outcome_10 = _triple_barrier_outcome(raw, index, HORIZON_10)
+            atr_value = _safe_float(features.iloc[index].get("atr_14"))
+            outcome_5 = _triple_barrier_outcome(raw, index, HORIZON_5, atr_value=atr_value)
+            outcome_10 = _triple_barrier_outcome(raw, index, HORIZON_10, atr_value=atr_value)
             feature_row.update({
                 "ticker_symbol": ticker, "trade_date": as_of_date, "sector": sector or "UNKNOWN",
                 **outcome_5,
@@ -236,7 +247,7 @@ def build_momentum_event_dataset(output_path: Path | str = "data/prediction/mome
         f"delivery_available={frame['delivery_available'].mean():.4f}"
     )
     print(f"dataset_output={output}")
-    return output
+
 
 
 def main() -> None:

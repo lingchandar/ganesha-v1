@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 import joblib
@@ -48,9 +49,6 @@ def _build_folds(dates: Iterable[pd.Timestamp], n_folds: int = N_FOLDS) -> list[
     unique_dates = pd.DatetimeIndex(sorted(pd.unique(pd.Series(list(dates)).dropna())))
     if len(unique_dates) < MIN_TRAIN_SESSIONS + n_folds * VALIDATION_SESSIONS:
         raise ValueError("Not enough trading sessions for requested walk-forward folds")
-
-    # Use the final n_folds validation windows, each preceded by an expanding
-    # training window. The validation windows are chronological and disjoint.
     available = len(unique_dates)
     total_validation = n_folds * VALIDATION_SESSIONS
     first_validation = available - total_validation
@@ -61,9 +59,7 @@ def _build_folds(dates: Iterable[pd.Timestamp], n_folds: int = N_FOLDS) -> list[
         train_end = val_start - PURGE_SESSIONS
         if train_end < MIN_TRAIN_SESSIONS:
             continue
-        train_idx = np.arange(0, train_end)
-        val_idx = np.arange(val_start, val_end)
-        folds.append((fold + 1, train_idx, val_idx))
+        folds.append((fold + 1, np.arange(0, train_end), np.arange(val_start, val_end)))
     if len(folds) < 2:
         raise ValueError("Walk-forward configuration produced fewer than two folds")
     return folds
@@ -78,11 +74,7 @@ def _make_model() -> CalibratedClassifierCV:
         l2_regularization=3.0,
         random_state=42,
     )
-    return CalibratedClassifierCV(
-        base,
-        method="sigmoid",
-        cv=TimeSeriesSplit(n_splits=3),
-    )
+    return CalibratedClassifierCV(base, method="sigmoid", cv=TimeSeriesSplit(n_splits=3))
 
 
 def _validate_frame(df: pd.DataFrame) -> None:
@@ -124,14 +116,11 @@ def train_walk_forward(dataset_path: str, model_path: str) -> list[FoldResult]:
         val_start_pos = int(val_date_idx[0])
         val_end_pos = int(val_date_idx[-1])
         train_end_pos = int(train_date_idx[-1])
-
         train_mask = date_positions <= train_end_pos
         val_mask = (date_positions >= val_start_pos) & (date_positions <= val_end_pos)
         train_df = df.loc[train_mask].copy()
         val_df = df.loc[val_mask].copy()
 
-        # Explicit invariant: no training label interval may reach the first
-        # validation decision date. Labels resolve up to 5 sessions later.
         if train_df["trade_date"].max() >= val_df["trade_date"].min():
             raise AssertionError("Training data reaches validation period")
         if train_df.empty or val_df.empty or train_df[LABEL_COLUMN].nunique() < 2:
@@ -167,8 +156,6 @@ def train_walk_forward(dataset_path: str, model_path: str) -> list[FoldResult]:
             )
         )
 
-    # Final production candidate is trained on all historical observations,
-    # while the fold metrics above remain the honest model-selection evidence.
     final_model = _make_model()
     final_model.fit(df[FEATURE_COLUMNS], df[LABEL_COLUMN])
     output = {
@@ -188,7 +175,7 @@ def train_walk_forward(dataset_path: str, model_path: str) -> list[FoldResult]:
             "oof_probability": oof_probability,
         }),
     }
-    path = joblib.Path(model_path)
+    path = Path(model_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(output, path)
 

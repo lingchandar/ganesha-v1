@@ -1,11 +1,4 @@
-"""Fast builder for the momentum-event research dataset.
-
-The original builder performs a point-in-time universe lookup inside the
-stock/session loop. This version caches those lookups once per trading day and
-reuses the same Nifty benchmark slice for every ticker on that day. The
-point-in-time membership rule is therefore preserved while removing thousands
-of repeated DataLoader operations.
-"""
+"""Fast builder for the momentum-event research dataset."""
 from __future__ import annotations
 
 import argparse
@@ -29,15 +22,11 @@ def build(output_path: Path, start_date: date | None = None, end_date: date | No
     loader = HistoricalDataLoader()
     loader.load_data(start_date=start_date, end_date=end_date)
 
-    # Cache the point-in-time universe and benchmark once per session instead
-    # of recomputing them for every ticker/session pair.
     eligible_by_date: dict[date, set[str]] = {}
     nifty_by_date: dict[date, pd.DataFrame] = {}
     print(f"Preparing point-in-time cache for {len(loader.trading_dates)} sessions...")
     for pos, as_of_date in enumerate(loader.trading_dates, start=1):
-        nifty_slice, candidate_data = loader.get_point_in_time_slice(
-            as_of_date, min_bars_required=30
-        )
+        nifty_slice, candidate_data = loader.get_point_in_time_slice(as_of_date, min_bars_required=30)
         eligible_by_date[as_of_date] = set(candidate_data.keys())
         nifty_by_date[as_of_date] = nifty_slice
         if pos == 1 or pos % 100 == 0 or pos == len(loader.trading_dates):
@@ -60,27 +49,20 @@ def build(output_path: Path, start_date: date | None = None, end_date: date | No
             as_of_date = pd.Timestamp(raw.index[index]).date()
             if ticker not in eligible_by_date.get(as_of_date, set()):
                 continue
-            feature_row = _build_feature_row(
-                raw,
-                features,
-                index,
-                nifty_by_date.get(as_of_date),
-                sector_series,
-            )
-            outcome_5 = _triple_barrier_outcome(raw, index, HORIZON_5)
-            outcome_10 = _triple_barrier_outcome(raw, index, HORIZON_10)
-            feature_row.update(
-                {
-                    "ticker_symbol": ticker,
-                    "trade_date": as_of_date,
-                    "sector": sector or "UNKNOWN",
-                    **outcome_5,
-                    "hit_up_before_down_10d": outcome_10["hit_up_before_down_10d"],
-                    "mfe_r_10d": outcome_10["mfe_r_10d"],
-                    "mae_r_10d": outcome_10["mae_r_10d"],
-                    "days_to_up_10d": outcome_10["days_to_up_10d"],
-                }
-            )
+            feature_row = _build_feature_row(raw, features, index, nifty_by_date.get(as_of_date), sector_series)
+            atr_value = float(features.iloc[index].get("atr_14", 0.0) or 0.0)
+            outcome_5 = _triple_barrier_outcome(raw, index, HORIZON_5, atr_value=atr_value)
+            outcome_10 = _triple_barrier_outcome(raw, index, HORIZON_10, atr_value=atr_value)
+            feature_row.update({
+                "ticker_symbol": ticker,
+                "trade_date": as_of_date,
+                "sector": sector or "UNKNOWN",
+                **outcome_5,
+                "hit_up_before_down_10d": outcome_10["hit_up_before_down_10d"],
+                "mfe_r_10d": outcome_10["mfe_r_10d"],
+                "mae_r_10d": outcome_10["mae_r_10d"],
+                "days_to_up_10d": outcome_10["days_to_up_10d"],
+            })
             rows.append(feature_row)
             ticker_rows += 1
 
@@ -91,12 +73,8 @@ def build(output_path: Path, start_date: date | None = None, end_date: date | No
 
     frame = pd.DataFrame(rows).sort_values(["trade_date", "ticker_symbol"]).reset_index(drop=True)
     required = FEATURE_COLUMNS + [
-        "hit_up_before_down_5d",
-        "hit_up_before_down_10d",
-        "mfe_r_5d",
-        "mae_r_5d",
-        "mfe_r_10d",
-        "mae_r_10d",
+        "hit_up_before_down_5d", "hit_up_before_down_10d",
+        "mfe_r_5d", "mae_r_5d", "mfe_r_10d", "mae_r_10d",
     ]
     if frame[required].isna().any().any():
         raise ValueError("Momentum event dataset contains NaN in required feature/outcome columns")

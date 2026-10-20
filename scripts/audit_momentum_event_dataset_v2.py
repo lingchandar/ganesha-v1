@@ -31,6 +31,13 @@ def _bucket_report(frame: pd.DataFrame, feature: str) -> pd.DataFrame:
 
 
 def audit(path: Path) -> None:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {path}\n"
+            "Build it first with:\n"
+            "PYTHONPATH=. .venv/bin/python -m src.prediction.momentum_event_dataset_v2"
+        )
+
     frame = pd.read_csv(path)
     missing = sorted(REQUIRED - set(frame.columns))
     if missing:

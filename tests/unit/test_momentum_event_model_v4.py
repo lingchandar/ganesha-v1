@@ -41,11 +41,16 @@ def test_cross_sectional_ranks_are_point_in_time():
 
 
 def test_rank_metrics_lift_uses_validation_base_rate():
-    y = pd.Series([0, 0, 0, 1, 1, 1, 0, 0, 0, 0])
-    probability = np.array([0.99, 0.98, 0.97, 0.20, 0.19, 0.18, 0.17, 0.16, 0.15, 0.14])
+    # Use 100 validation observations so top-10% is exactly 10 rows.
+    y = pd.Series([1] * 30 + [0] * 70)
+    probability = np.concatenate([
+        np.linspace(0.99, 0.90, 10),
+        np.linspace(0.80, 0.70, 20),
+        np.linspace(0.69, 0.01, 70),
+    ])
     metrics = _rank_metrics(y, probability)
-    assert metrics["top10_rate"] == 0.3
-    assert metrics["top10_lift"] == 1.0
+    assert metrics["top10_rate"] == 1.0
+    assert metrics["top10_lift"] == 1.0 / 0.3
 
 
 def test_required_columns_are_validated():

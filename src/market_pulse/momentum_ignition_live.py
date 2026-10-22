@@ -13,8 +13,6 @@ from src.prediction.fresh_momentum_ignition import build_fresh_next_session_watc
 
 @dataclass(frozen=True)
 class MomentumIgnitionLiveDecision:
-    """Real-time decision for a stock already ranked by the daily model."""
-
     ticker_symbol: str
     ignition_probability: float
     watchlist_rank: Optional[int]
@@ -28,23 +26,11 @@ class MomentumIgnitionLiveDecision:
 
 
 class MomentumIgnitionLiveEngine:
-    """Combine fresh daily predictions with live intraday confirmation.
-
-    The daily model creates the watchlist from fresh FYERS completed daily
-    candles. The live scanner independently confirms whether the predicted
-    ignition is actually starting. No order execution is performed.
-    """
+    """Combine daily ignition predictions with live intraday confirmation."""
 
     STATUS_LOG_INTERVAL_SECONDS = 60.0
 
-    def __init__(
-        self,
-        scanner: LiveMarketScanner,
-        *,
-        watchlist: Optional[pd.DataFrame] = None,
-        top_n: int = 10,
-        status_logging: bool = True,
-    ) -> None:
+    def __init__(self, scanner: LiveMarketScanner, *, watchlist: Optional[pd.DataFrame] = None, top_n: int = 10, status_logging: bool = True) -> None:
         if top_n < 1:
             raise ValueError("top_n must be >= 1")
         self.scanner = scanner
@@ -74,23 +60,16 @@ class MomentumIgnitionLiveEngine:
         self._maybe_log_status()
 
     def _maybe_log_status(self) -> None:
-        """Print a compact watchlist heartbeat at most once per minute."""
         if not self.status_logging or not self._watchlist:
             return
         now = time.monotonic()
         if now - self._last_status_log < self.STATUS_LOG_INTERVAL_SECONDS:
             return
         self._last_status_log = now
-
-        decisions = [
-            self._latest_decisions[symbol]
-            for symbol in self._watchlist
-            if symbol in self._latest_decisions
-        ]
+        decisions = [self._latest_decisions[symbol] for symbol in self._watchlist if symbol in self._latest_decisions]
         if not decisions:
             return
         decisions.sort(key=lambda item: item.watchlist_rank or 999)
-
         print("\nLIVE MOMENTUM WATCHLIST")
         print("rank ticker         action  price       3m      5m    volume  range   ignition")
         print("---- ------------- ------- --------- ------- ------- ------- ------- --------")
@@ -98,20 +77,77 @@ class MomentumIgnitionLiveEngine:
             print(
                 f"{decision.watchlist_rank:>4} "
                 f"{decision.ticker_symbol.replace('NSE:', '').replace('-EQ', ''):<13} "
-                f"{decision.action:<7} "
-                f"{decision.price:>9.2f} "
-                f"{decision.return_3m_pct:>6.2f}% "
-                f"{decision.return_5m_pct:>6.2f}% "
-                f"{decision.session_volume_ratio:>6.2f}x "
-                f"{decision.range_ratio:>6.2f}x "
+                f"{decision.action:<7} {decision.price:>9.2f} "
+                f"{decision.return_3m_pct:>6.2f}% {decision.return_5m_pct:>6.2f}% "
+                f"{decision.session_volume_ratio:>6.2f}x {decision.range_ratio:>6.2f}x "
                 f"{decision.ignition_probability:>7.2%}"
             )
         print()
 
     def refresh_watchlist(self) -> pd.DataFrame:
-        """Build the next-session watchlist from fresh FYERS daily data."""
         watchlist = build_fresh_next_session_watchlist(top_n=self.top_n)
         self.set_watchlist(watchlist)
         return watchlist
 
-    def set_watchlist(self, watchlist: pd.DataFrame) -> None
+    def set_watchlist(self, watchlist: pd.DataFrame) -> None:
+        required = {"ticker_symbol", "ignition_probability"}
+        missing = required - set(watchlist.columns)
+        if missing:
+            raise ValueError(f"Watchlist missing required columns: {sorted(missing)}")
+        ranked = watchlist.sort_values("ignition_probability", ascending=False).reset_index(drop=True)
+        selected: dict[str, tuple[float, int]] = {}
+        for rank, row in ranked.head(self.top_n).iterrows():
+            symbol = str(row["ticker_symbol"])
+            if symbol not in self.scanner.symbols:
+                continue
+            selected[symbol] = (float(row["ignition_probability"]), int(rank) + 1)
+        self._watchlist = selected
+
+    @property
+    def watchlist_symbols(self) -> tuple[str, ...]:
+        return tuple(self._watchlist)
+
+    def process_tick(self, tick) -> Optional[MomentumIgnitionLiveDecision]:
+        self.scanner.process_tick(tick)
+        snapshot = next((item for item in self.scanner.snapshots() if item.ticker_symbol == tick.symbol), None)
+        if snapshot is None:
+            return None
+        return self.evaluate_snapshot(snapshot)
+
+    def evaluate_snapshot(self, snapshot: LiveScannerSnapshot) -> MomentumIgnitionLiveDecision:
+        model_signal = self._watchlist.get(snapshot.ticker_symbol)
+        if model_signal is None:
+            action, probability, rank = "AVOID", 0.0, None
+        else:
+            probability, rank = model_signal
+            action = "ENTRY" if snapshot.momentum_event else "WATCH"
+        return MomentumIgnitionLiveDecision(
+            ticker_symbol=snapshot.ticker_symbol,
+            ignition_probability=probability,
+            watchlist_rank=rank,
+            price=snapshot.price,
+            return_3m_pct=snapshot.return_3m_pct,
+            return_5m_pct=snapshot.return_5m_pct,
+            session_volume_ratio=snapshot.session_volume_ratio,
+            range_ratio=snapshot.range_ratio,
+            momentum_event=snapshot.momentum_event,
+            action=action,
+        )
+
+    def decisions(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
+        with_live = self._latest_decisions.copy()
+        for snapshot in self.scanner.snapshots():
+            with_live[snapshot.ticker_symbol] = self.evaluate_snapshot(snapshot)
+        return tuple(with_live.values())
+
+    def entry_candidates(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
+        return tuple(decision for decision in self.decisions() if decision.action == "ENTRY")
+
+    def connect(self) -> None:
+        self.scanner.connect()
+
+    def keep_running(self) -> None:
+        self.scanner.keep_running()
+
+    def close(self) -> None:
+        self.scanner.close()

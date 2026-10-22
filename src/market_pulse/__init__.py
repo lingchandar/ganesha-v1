@@ -9,6 +9,7 @@ from .engine import (
     build_market_pulse,
 )
 from .live_scanner import LiveMarketScanner, LiveScannerSnapshot, NSE_59_SYMBOLS
+from .momentum_ignition_live import MomentumIgnitionLiveDecision, MomentumIgnitionLiveEngine
 
 __all__ = [
     "MarketPulse",
@@ -20,4 +21,6 @@ __all__ = [
     "LiveMarketScanner",
     "LiveScannerSnapshot",
     "NSE_59_SYMBOLS",
+    "MomentumIgnitionLiveDecision",
+    "MomentumIgnitionLiveEngine",
 ]

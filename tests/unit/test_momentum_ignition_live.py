@@ -66,6 +66,7 @@ def test_watchlist_signal_becomes_entry_after_live_confirmation():
     assert decision.watchlist_rank == 1
     assert decision.momentum_event is True
     assert decision.action == "ENTRY"
+    assert engine.entry_candidates()[0].ticker_symbol == "NSE:TRENT-EQ"
 
 
 def test_watchlist_without_confirmation_is_watch():

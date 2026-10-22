@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Optional
+from typing import Optional
 
 import pandas as pd
 
@@ -45,8 +45,23 @@ class MomentumIgnitionLiveEngine:
         self.scanner = scanner
         self.top_n = top_n
         self._watchlist: dict[str, tuple[float, int]] = {}
+        self._latest_decisions: dict[str, MomentumIgnitionLiveDecision] = {}
+        self.scanner.set_snapshot_handler(self._on_live_snapshot)
         if watchlist is not None:
             self.set_watchlist(watchlist)
+
+    def _on_live_snapshot(self, snapshot: LiveScannerSnapshot) -> None:
+        decision = self.evaluate_snapshot(snapshot)
+        self._latest_decisions[snapshot.ticker_symbol] = decision
+        if decision.action == "ENTRY":
+            print(
+                "MOMENTUM_IGNITION_ENTRY "
+                f"ticker={decision.ticker_symbol} "
+                f"probability={decision.ignition_probability:.4f} "
+                f"price={decision.price:.2f} "
+                f"return_3m={decision.return_3m_pct:.2f}% "
+                f"volume_ratio={decision.session_volume_ratio:.2f}x"
+            )
 
     def refresh_watchlist(self) -> pd.DataFrame:
         """Build the latest completed-day next-session watchlist."""
@@ -110,11 +125,11 @@ class MomentumIgnitionLiveEngine:
         )
 
     def decisions(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
-        """Return decisions for all stocks currently visible to the live scanner."""
-        return tuple(
-            self.evaluate_snapshot(snapshot)
-            for snapshot in self.scanner.snapshots()
-        )
+        """Return latest decisions for stocks currently visible to the scanner."""
+        with_live = self._latest_decisions.copy()
+        for snapshot in self.scanner.snapshots():
+            with_live[snapshot.ticker_symbol] = self.evaluate_snapshot(snapshot)
+        return tuple(with_live.values())
 
     def entry_candidates(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
         """Return only model-backed stocks with live momentum confirmation."""

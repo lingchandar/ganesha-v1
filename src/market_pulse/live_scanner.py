@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from statistics import mean
 from threading import RLock
-from typing import Iterable, Mapping, Optional
+from typing import Callable, Iterable, Mapping, Optional
 from zoneinfo import ZoneInfo
 
 from src.ingestion.fyers_realtime import FyersRealtimeClient, LiveMarketTick
@@ -60,6 +60,9 @@ class LiveScannerSnapshot:
     candle_count: int
 
 
+SnapshotHandler = Callable[[LiveScannerSnapshot], None]
+
+
 class LiveMarketScanner:
     """Build a live MarketPulse from the existing FYERS tick stream."""
 
@@ -74,6 +77,7 @@ class LiveMarketScanner:
         baseline_daily_volume: Optional[Mapping[str, float]] = None,
         baseline_daily_volume_history: Optional[Mapping[str, Iterable[float]]] = None,
         tick_client: Optional[FyersRealtimeClient] = None,
+        snapshot_handler: Optional[SnapshotHandler] = None,
     ) -> None:
         requested = tuple(sorted({str(s).strip() for s in symbols if str(s).strip()}))
         if not requested:
@@ -96,7 +100,13 @@ class LiveMarketScanner:
         self._last_ticks: dict[str, LiveMarketTick] = {}
         self._candles: dict[str, deque] = defaultdict(lambda: deque(maxlen=self.MAX_CANDLES))
         self._lock = RLock()
+        self._snapshot_handler = snapshot_handler
         self.tick_client = tick_client or FyersRealtimeClient(tick_handler=self.process_tick)
+
+    def set_snapshot_handler(self, handler: Optional[SnapshotHandler]) -> None:
+        """Attach a callback invoked whenever a completed one-minute snapshot updates."""
+        with self._lock:
+            self._snapshot_handler = handler
 
     def process_tick(self, tick: LiveMarketTick) -> None:
         """Process one normalized FYERS tick; completed candles update the pulse."""
@@ -109,12 +119,18 @@ class LiveMarketScanner:
     def _on_candle(self, candle) -> None:
         if candle.symbol not in self.symbols:
             return
+        handler = None
+        snapshot = None
         with self._lock:
             candles = self._candles[candle.symbol]
             candles.append(candle)
             self.buffer.add(candle)
             tick = self._last_ticks.get(candle.symbol)
-            self._snapshots[candle.symbol] = self._calculate_snapshot(candle.symbol, tick)
+            snapshot = self._calculate_snapshot(candle.symbol, tick)
+            self._snapshots[candle.symbol] = snapshot
+            handler = self._snapshot_handler
+        if handler is not None and snapshot is not None:
+            handler(snapshot)
 
     def _calculate_snapshot(self, symbol: str, tick: Optional[LiveMarketTick]) -> LiveScannerSnapshot:
         candles = list(self._candles[symbol])

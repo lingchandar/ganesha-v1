@@ -16,7 +16,8 @@ def tick(symbol: str, minute: int, price: float, volume: int, previous_close: fl
         low_price=price,
         previous_close=previous_close,
         volume_traded=volume,
-        timestamp=datetime(2026, 10, 14, 4, 0, tzinfo=UTC) + timedelta(minutes=minute),
+        # 03:45 UTC = 09:15 IST, so the fixture starts exactly at market open.
+        timestamp=datetime(2026, 10, 14, 3, 45, tzinfo=UTC) + timedelta(minutes=minute),
         raw_message={},
     )
 
@@ -33,10 +34,19 @@ def test_scanner_builds_candles_and_detects_early_momentum_event():
         baseline_daily_volume={"NSE:KOTAKBANK-EQ": 1_000_000},
     )
 
-    # Feed one-minute ticks. The tick for the next minute closes the previous candle.
-    prices = [100.00, 100.05, 100.10, 100.25, 100.45, 100.70, 101.00, 101.20]
-    volumes = [1_000, 2_000, 3_000, 4_000, 5_000, 7_000, 15_000, 100_000]
-    for minute, (price, volume) in enumerate(zip(prices, volumes)):
+    # Two ticks per minute create realistic candle ranges. The final minute is
+    # closed by the next minute's tick, so the scanner evaluates seven candles.
+    feed = [
+        (0, 100.00, 1_000), (0, 100.20, 2_000),
+        (1, 100.05, 3_000), (1, 100.25, 4_000),
+        (2, 100.10, 5_000), (2, 100.30, 6_000),
+        (3, 100.15, 7_000), (3, 100.35, 8_000),
+        (4, 100.20, 9_000), (4, 100.40, 10_000),
+        (5, 100.25, 12_000), (5, 100.45, 15_000),
+        (6, 100.30, 18_000), (6, 101.00, 25_000),
+        (7, 101.20, 120_000),
+    ]
+    for minute, price, volume in feed:
         scanner.process_tick(tick("NSE:KOTAKBANK-EQ", minute, price, volume))
 
     snapshot = scanner.snapshots()[0]
@@ -46,6 +56,7 @@ def test_scanner_builds_candles_and_detects_early_momentum_event():
     assert snapshot.change_pct > 0
     assert snapshot.return_3m_pct > 0.5
     assert snapshot.session_volume_ratio > 1.75
+    assert snapshot.range_ratio > 1.25
     assert snapshot.momentum_score > 0
     assert snapshot.money_flow_score > 0
     assert snapshot.momentum_event is True

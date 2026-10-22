@@ -16,7 +16,7 @@ def tick(symbol: str, minute: int, price: float, volume: int, previous_close: fl
         low_price=price,
         previous_close=previous_close,
         volume_traded=volume,
-        timestamp=datetime(2026, 10, 14, 3, 15, tzinfo=UTC) + timedelta(minutes=minute),
+        timestamp=datetime(2026, 10, 14, 4, 0, tzinfo=UTC) + timedelta(minutes=minute),
         raw_message={},
     )
 

@@ -7,7 +7,7 @@ from typing import Optional
 import pandas as pd
 
 from src.market_pulse.live_scanner import LiveMarketScanner, LiveScannerSnapshot
-from src.prediction.momentum_ignition_scorer import build_next_session_watchlist
+from src.prediction.fresh_momentum_ignition import build_fresh_next_session_watchlist
 
 
 @dataclass(frozen=True)
@@ -27,19 +27,14 @@ class MomentumIgnitionLiveDecision:
 
 
 class MomentumIgnitionLiveEngine:
-    """Combine next-session daily predictions with live intraday confirmation.
+    """Combine fresh daily predictions with live intraday confirmation.
 
-    The daily model creates the watchlist. The live scanner confirms whether the
-    predicted ignition is actually starting. No order execution is performed.
+    The daily model creates the watchlist from fresh FYERS completed daily
+    candles. The live scanner independently confirms whether the predicted
+    ignition is actually starting. No order execution is performed.
     """
 
-    def __init__(
-        self,
-        scanner: LiveMarketScanner,
-        *,
-        watchlist: Optional[pd.DataFrame] = None,
-        top_n: int = 10,
-    ) -> None:
+    def __init__(self, scanner: LiveMarketScanner, *, watchlist: Optional[pd.DataFrame] = None, top_n: int = 10) -> None:
         if top_n < 1:
             raise ValueError("top_n must be >= 1")
         self.scanner = scanner
@@ -64,8 +59,8 @@ class MomentumIgnitionLiveEngine:
             )
 
     def refresh_watchlist(self) -> pd.DataFrame:
-        """Build the latest completed-day next-session watchlist."""
-        watchlist = build_next_session_watchlist(top_n=self.top_n)
+        """Build the next-session watchlist from fresh FYERS daily data."""
+        watchlist = build_fresh_next_session_watchlist(top_n=self.top_n)
         self.set_watchlist(watchlist)
         return watchlist
 
@@ -74,7 +69,6 @@ class MomentumIgnitionLiveEngine:
         missing = required - set(watchlist.columns)
         if missing:
             raise ValueError(f"Watchlist missing required columns: {sorted(missing)}")
-
         ranked = watchlist.sort_values("ignition_probability", ascending=False).reset_index(drop=True)
         selected: dict[str, tuple[float, int]] = {}
         for rank, row in ranked.head(self.top_n).iterrows():
@@ -89,12 +83,8 @@ class MomentumIgnitionLiveEngine:
         return tuple(self._watchlist)
 
     def process_tick(self, tick) -> Optional[MomentumIgnitionLiveDecision]:
-        """Feed one FYERS tick and return the latest decision for its symbol."""
         self.scanner.process_tick(tick)
-        snapshot = next(
-            (item for item in self.scanner.snapshots() if item.ticker_symbol == tick.symbol),
-            None,
-        )
+        snapshot = next((item for item in self.scanner.snapshots() if item.ticker_symbol == tick.symbol), None)
         if snapshot is None:
             return None
         return self.evaluate_snapshot(snapshot)
@@ -107,10 +97,7 @@ class MomentumIgnitionLiveEngine:
             rank = None
         else:
             probability, rank = model_signal
-            # ENTRY means the model predicted the next-session ignition and the
-            # independent live scanner confirms the move is starting now.
             action = "ENTRY" if snapshot.momentum_event else "WATCH"
-
         return MomentumIgnitionLiveDecision(
             ticker_symbol=snapshot.ticker_symbol,
             ignition_probability=probability,
@@ -125,14 +112,12 @@ class MomentumIgnitionLiveEngine:
         )
 
     def decisions(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
-        """Return latest decisions for stocks currently visible to the scanner."""
         with_live = self._latest_decisions.copy()
         for snapshot in self.scanner.snapshots():
             with_live[snapshot.ticker_symbol] = self.evaluate_snapshot(snapshot)
         return tuple(with_live.values())
 
     def entry_candidates(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
-        """Return only model-backed stocks with live momentum confirmation."""
         return tuple(decision for decision in self.decisions() if decision.action == "ENTRY")
 
     def connect(self) -> None:

@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
 
 DEFAULT_MODEL_PATH = Path("models/momentum_ignition_v1.joblib")
@@ -26,7 +26,10 @@ class MomentumIgnitionScorer:
 
         scored = frame.copy()
         features = scored[self.features].apply(pd.to_numeric, errors="coerce")
-        scored["ignition_probability"] = self.model.predict_proba(features)[:, 1]
+        probabilities = np.asarray(self.model.predict_proba(features))
+        if probabilities.ndim != 2 or probabilities.shape[1] < 2:
+            raise ValueError("Model predict_proba must return a 2-column probability matrix")
+        scored["ignition_probability"] = probabilities[:, 1]
         scored["model_version"] = self.model_version
         return scored
 

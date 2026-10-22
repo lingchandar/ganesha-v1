@@ -21,6 +21,7 @@ IST = ZoneInfo("Asia/Kolkata")
 MIN_HISTORY = 200
 LOOKBACK_DAYS = 300
 FRESH_REQUEST_INTERVAL_SECONDS = 1.05
+RETRY_DELAYS_SECONDS = (2.0, 4.0, 8.0)
 FYERS_NIFTY50 = "NSE:NIFTY50-INDEX"
 
 
@@ -46,8 +47,15 @@ def _latest_completed_date() -> date:
 
 
 def _fetch_daily(client: MarketDataClient, symbol: str, from_date: date, to_date: date) -> pd.DataFrame:
-    sleep(FRESH_REQUEST_INTERVAL_SECONDS)
-    return _normalise(client.fetch_historical_candles(symbol, from_date, to_date, "D"))
+    """Fetch daily data with pacing and retries for transient FYERS rate limits."""
+    for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
+        sleep(FRESH_REQUEST_INTERVAL_SECONDS)
+        result = _normalise(client.fetch_historical_candles(symbol, from_date, to_date, "D"))
+        if not result.empty:
+            return result
+        if attempt < len(RETRY_DELAYS_SECONDS):
+            sleep(RETRY_DELAYS_SECONDS[attempt])
+    return pd.DataFrame()
 
 
 def build_fresh_next_session_watchlist(
@@ -87,9 +95,6 @@ def build_fresh_next_session_watchlist(
             vector = _vectorized_features(raw, features, sector_series)
             idx = vector.index[-1]
             row = vector.loc[idx, FEATURE_COLUMNS].to_dict()
-            # _vectorized_features already contains stock-vs-Nifty relative strength
-            # when benchmark adjustment is applied upstream. Its base columns are
-            # return_5d and relative_strength_20d; there is no return_20d column.
             row["relative_strength_5d"] = float(row["return_5d"]) - bench5
             row["relative_strength_20d"] = float(row["relative_strength_20d"]) - bench20
             row["ticker_symbol"] = ticker

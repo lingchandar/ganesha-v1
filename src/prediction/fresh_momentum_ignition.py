@@ -19,8 +19,6 @@ from src.prediction.momentum_ignition_scorer import MomentumIgnitionScorer
 
 IST = ZoneInfo("Asia/Kolkata")
 MIN_HISTORY = 200
-# FYERS history rejects requests that exceed its supported historical range.
-# 300 calendar days still provides >200 NSE sessions in normal conditions.
 LOOKBACK_DAYS = 300
 FRESH_REQUEST_INTERVAL_SECONDS = 1.05
 FYERS_NIFTY50 = "NSE:NIFTY50-INDEX"
@@ -29,15 +27,10 @@ FYERS_NIFTY50 = "NSE:NIFTY50-INDEX"
 def _normalise(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame()
-    out = frame.rename(
-        columns={
-            "open_price": "open",
-            "high_price": "high",
-            "low_price": "low",
-            "close_price": "close",
-            "volume_traded": "volume",
-        }
-    ).copy()
+    out = frame.rename(columns={
+        "open_price": "open", "high_price": "high", "low_price": "low",
+        "close_price": "close", "volume_traded": "volume",
+    }).copy()
     out["trade_date"] = pd.to_datetime(out["timestamp"]).dt.date
     out = out.drop_duplicates("trade_date").sort_values("trade_date").set_index("trade_date")
     for column in ("open", "high", "low", "close", "volume"):
@@ -52,13 +45,7 @@ def _latest_completed_date() -> date:
     return (now - timedelta(days=1)).date()
 
 
-def _fetch_daily(
-    client: MarketDataClient,
-    symbol: str,
-    from_date: date,
-    to_date: date,
-) -> pd.DataFrame:
-    """Fetch one daily series while spacing requests to avoid FYERS 429s."""
+def _fetch_daily(client: MarketDataClient, symbol: str, from_date: date, to_date: date) -> pd.DataFrame:
     sleep(FRESH_REQUEST_INTERVAL_SECONDS)
     return _normalise(client.fetch_historical_candles(symbol, from_date, to_date, "D"))
 
@@ -67,13 +54,10 @@ def build_fresh_next_session_watchlist(
     top_n: int = 10,
     model_path: Path = Path("models/momentum_ignition_v1.joblib"),
 ) -> pd.DataFrame:
-    """Fetch fresh daily OHLCV from FYERS and score the latest completed session."""
     if top_n < 1:
         raise ValueError("top_n must be >= 1")
     if not FyersAuthManager.load_cached_token():
-        raise RuntimeError(
-            "No valid FYERS access token. Run 'PYTHONPATH=. .venv/bin/python -m src.ingestion.fyers_auth' first."
-        )
+        raise RuntimeError("No valid FYERS access token. Authenticate first.")
 
     loader = HistoricalDataLoader()
     loader.load_data()
@@ -95,9 +79,6 @@ def build_fresh_next_session_watchlist(
             raw = _fetch_daily(client, ticker, from_date, completed_date)
             if len(raw) < MIN_HISTORY:
                 continue
-
-            # Delivery is not available from this FYERS endpoint. Keep the
-            # feature neutral rather than inventing current-day delivery data.
             raw["delivery_percentage"] = np.nan
             sector = loader.ticker_sectors.get(ticker)
             sector_series = loader.sector_series.get(sector)
@@ -106,8 +87,11 @@ def build_fresh_next_session_watchlist(
             vector = _vectorized_features(raw, features, sector_series)
             idx = vector.index[-1]
             row = vector.loc[idx, FEATURE_COLUMNS].to_dict()
+            # _vectorized_features already contains stock-vs-Nifty relative strength
+            # when benchmark adjustment is applied upstream. Its base columns are
+            # return_5d and relative_strength_20d; there is no return_20d column.
             row["relative_strength_5d"] = float(row["return_5d"]) - bench5
-            row["relative_strength_20d"] = float(row["return_20d"]) - bench20
+            row["relative_strength_20d"] = float(row["relative_strength_20d"]) - bench20
             row["ticker_symbol"] = ticker
             row["trade_date"] = idx
             rows.append(row)

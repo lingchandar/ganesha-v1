@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from time import sleep
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -18,20 +19,25 @@ from src.prediction.momentum_ignition_scorer import MomentumIgnitionScorer
 
 IST = ZoneInfo("Asia/Kolkata")
 MIN_HISTORY = 200
-LOOKBACK_DAYS = 400
+# FYERS history rejects requests that exceed its supported historical range.
+# 300 calendar days still provides >200 NSE sessions in normal conditions.
+LOOKBACK_DAYS = 300
+FRESH_REQUEST_INTERVAL_SECONDS = 1.05
 FYERS_NIFTY50 = "NSE:NIFTY50-INDEX"
 
 
 def _normalise(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame()
-    out = frame.rename(columns={
-        "open_price": "open",
-        "high_price": "high",
-        "low_price": "low",
-        "close_price": "close",
-        "volume_traded": "volume",
-    }).copy()
+    out = frame.rename(
+        columns={
+            "open_price": "open",
+            "high_price": "high",
+            "low_price": "low",
+            "close_price": "close",
+            "volume_traded": "volume",
+        }
+    ).copy()
     out["trade_date"] = pd.to_datetime(out["timestamp"]).dt.date
     out = out.drop_duplicates("trade_date").sort_values("trade_date").set_index("trade_date")
     for column in ("open", "high", "low", "close", "volume"):
@@ -41,12 +47,20 @@ def _normalise(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _latest_completed_date() -> date:
     now = datetime.now(IST)
-    # During the regular session, today's daily candle is incomplete.
-    if now.weekday() < 5 and now.hour < 15:
-        return (now - timedelta(days=1)).date()
-    if now.weekday() < 5 and now.hour == 15 and now.minute < 30:
-        return (now - timedelta(days=1)).date()
-    return now.date() if now.hour >= 15 and now.minute >= 30 else (now - timedelta(days=1)).date()
+    if now.weekday() < 5 and (now.hour, now.minute) >= (15, 30):
+        return now.date()
+    return (now - timedelta(days=1)).date()
+
+
+def _fetch_daily(
+    client: MarketDataClient,
+    symbol: str,
+    from_date: date,
+    to_date: date,
+) -> pd.DataFrame:
+    """Fetch one daily series while spacing requests to avoid FYERS 429s."""
+    sleep(FRESH_REQUEST_INTERVAL_SECONDS)
+    return _normalise(client.fetch_historical_candles(symbol, from_date, to_date, "D"))
 
 
 def build_fresh_next_session_watchlist(
@@ -57,7 +71,9 @@ def build_fresh_next_session_watchlist(
     if top_n < 1:
         raise ValueError("top_n must be >= 1")
     if not FyersAuthManager.load_cached_token():
-        raise RuntimeError("No valid FYERS access token. Run 'PYTHONPATH=. .venv/bin/python -m src.ingestion.fyers_auth' first.")
+        raise RuntimeError(
+            "No valid FYERS access token. Run 'PYTHONPATH=. .venv/bin/python -m src.ingestion.fyers_auth' first."
+        )
 
     loader = HistoricalDataLoader()
     loader.load_data()
@@ -68,7 +84,7 @@ def build_fresh_next_session_watchlist(
         raise RuntimeError("FYERS authentication failed while refreshing daily data")
 
     try:
-        nifty = _normalise(client.fetch_historical_candles(FYERS_NIFTY50, from_date, completed_date, "D"))
+        nifty = _fetch_daily(client, FYERS_NIFTY50, from_date, completed_date)
         nifty_close = pd.to_numeric(nifty.get("close", pd.Series(dtype=float)), errors="coerce")
         bench5 = float(nifty_close.pct_change(5).iloc[-1]) if len(nifty_close) >= 6 else 0.0
         bench20 = float(nifty_close.pct_change(20).iloc[-1]) if len(nifty_close) >= 21 else 0.0
@@ -76,7 +92,7 @@ def build_fresh_next_session_watchlist(
         scorer = MomentumIgnitionScorer(model_path)
         rows: list[dict] = []
         for ticker in loader.universe_df["ticker_symbol"].tolist():
-            raw = _normalise(client.fetch_historical_candles(ticker, from_date, completed_date, "D"))
+            raw = _fetch_daily(client, ticker, from_date, completed_date)
             if len(raw) < MIN_HISTORY:
                 continue
 
@@ -91,7 +107,7 @@ def build_fresh_next_session_watchlist(
             idx = vector.index[-1]
             row = vector.loc[idx, FEATURE_COLUMNS].to_dict()
             row["relative_strength_5d"] = float(row["return_5d"]) - bench5
-            row["relative_strength_20d"] = float(row["relative_strength_20d"]) - bench20
+            row["relative_strength_20d"] = float(row["return_20d"]) - bench20
             row["ticker_symbol"] = ticker
             row["trade_date"] = idx
             rows.append(row)

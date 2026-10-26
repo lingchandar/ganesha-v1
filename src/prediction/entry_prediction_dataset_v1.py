@@ -51,12 +51,17 @@ def _label_trade(features: pd.DataFrame, entry_idx: int, signal, horizon: int) -
         if stop_hit or target_hit:
             break
 
+    unresolved = not target_hit and not stop_hit
+    horizon_end_close = None
+    horizon_end_r = None
+    if unresolved and len(future) == horizon:
+        horizon_end_close = float(future.iloc[-1]["close_price"])
+        horizon_end_r = (horizon_end_close - entry) / risk
+
     if stop_hit and target_hit:
         target_before_stop = int(days_to_target < days_to_stop)
     elif target_hit:
         target_before_stop = 1
-    elif stop_hit:
-        target_before_stop = 0
     else:
         target_before_stop = 0
 
@@ -66,7 +71,9 @@ def _label_trade(features: pd.DataFrame, entry_idx: int, signal, horizon: int) -
         "mae_r": mae_r,
         "days_to_target": days_to_target if days_to_target is not None else 0,
         "days_to_stop": days_to_stop if days_to_stop is not None else 0,
-        "outcome_valid": int(target_hit or stop_hit),
+        "outcome_valid": int(not unresolved),
+        "horizon_end_close": horizon_end_close,
+        "horizon_end_r": horizon_end_r,
     }
 
 
@@ -124,6 +131,8 @@ def build_dataset(
         "mfe_r",
         "mae_r",
         "outcome_valid",
+        "horizon_end_close",
+        "horizon_end_r",
     ]
     missing = [column for column in required if column not in frame.columns]
     if missing:
@@ -132,6 +141,15 @@ def build_dataset(
         raise ValueError("Entry prediction v1 dataset contains NaN features")
     if frame.duplicated(["ticker_symbol", "trade_date", "setup_type"]).any():
         raise ValueError("Entry prediction v1 dataset contains duplicate examples")
+
+    unresolved = frame[frame["outcome_valid"] == 0]
+    if unresolved["horizon_end_close"].isna().any() or unresolved["horizon_end_r"].isna().any():
+        raise ValueError("Unresolved outcomes must have horizon-end close and R-multiple")
+    if frame["outcome_valid"].eq(1).any():
+        # Barrier-resolved trades intentionally do not use horizon-end outcome fields.
+        resolved = frame["outcome_valid"] == 1
+        if frame.loc[resolved, ["horizon_end_close", "horizon_end_r"]].notna().any().any():
+            raise ValueError("Resolved barrier outcomes must not use horizon-end fields")
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)

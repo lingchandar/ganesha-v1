@@ -1,21 +1,31 @@
 import pandas as pd
 
-from scripts.diagnose_entry_prediction_v1 import _daily_top_k, _metric
+from scripts.diagnose_entry_prediction_v1 import _daily_top_k, _metric, _score_column
 
 
-def test_metric_detects_perfect_ranking():
+def test_metric_detects_perfect_ranking_from_probability():
     frame = pd.DataFrame({
-        "prediction": [0.9, 0.1, 0.8, 0.2],
+        "probability": [0.9, 0.1, 0.8, 0.2],
         "label_target_before_stop": [1, 0, 1, 0],
     })
+    assert _score_column(frame) == "probability"
     result = _metric(frame)
     assert result["auc"] == 1.0
+
+
+def test_metric_accepts_prediction_alias():
+    frame = pd.DataFrame({
+        "prediction": [0.9, 0.1],
+        "label_target_before_stop": [1, 0],
+    })
+    assert _score_column(frame) == "prediction"
+    assert _metric(frame)["auc"] == 1.0
 
 
 def test_daily_top_k_uses_daily_ranking():
     frame = pd.DataFrame({
         "trade_date": pd.to_datetime(["2026-01-01"] * 3 + ["2026-01-02"] * 3),
-        "prediction": [0.9, 0.2, 0.1, 0.8, 0.3, 0.2],
+        "probability": [0.9, 0.2, 0.1, 0.8, 0.3, 0.2],
         "label_target_before_stop": [1, 0, 0, 0, 1, 0],
     })
     rate, lift, days = _daily_top_k(frame, 1)

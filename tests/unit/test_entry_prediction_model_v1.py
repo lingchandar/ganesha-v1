@@ -11,7 +11,7 @@ def test_top_lift_rewards_ranked_positive_examples():
 
 
 def test_folds_keep_purge_between_train_and_validation():
-    dates = pd.date_range("2024-01-01", periods=300, freq="D")
+    dates = pd.date_range("2024-01-01", periods=420, freq="D")
     rows = []
     for d in dates:
         rows.extend([

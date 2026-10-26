@@ -16,12 +16,23 @@ from src.backtest.backtest_engine import BacktestEngine, BacktestConfig
 from src.backtest.report_generator import BacktestReportGenerator
 
 
+SETUP_TYPES = (
+    "DEMAND_SUPPORT_BOUNCE",
+    "TREND_CONTINUATION_FLAG",
+    "TREND_PULLBACK",
+    "BREAKOUT_RETEST",
+    "RS_LEADER_BREAKOUT",
+    "CLASSIC_RESISTANCE_BREAKOUT",
+)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run GANESHA V1 Institutional Historical Backtest.")
     parser.add_argument("--capital", type=float, default=500_000.0, help="Initial capital in INR (default: 500,000)")
     parser.add_argument("--risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default: 0.01 = 1 percent)")
     parser.add_argument("--max-positions", type=int, default=5, help="Max concurrent positions (default: 5)")
     parser.add_argument("--max-sector", type=int, default=2, help="Max positions per sector (default: 2)")
+    parser.add_argument("--setup", dest="setup_type_filter", choices=SETUP_TYPES, default=None, help="Restrict backtest to one setup type (default: all setups)")
     parser.add_argument("--no-friction", action="store_true", help="Disable statutory delivery friction deduction")
     parser.add_argument("--no-regime", action="store_true", help="Disable Nifty 50 regime filter")
     parser.add_argument("--no-rs", action="store_true", help="Disable Mansfield RS filter")
@@ -39,6 +50,7 @@ def main() -> int:
         max_risk_pct=args.risk_pct,
         max_concurrent_positions=args.max_positions,
         max_per_sector=args.max_sector,
+        setup_type_filter=args.setup_type_filter,
         enable_friction=not args.no_friction,
         enable_regime_filter=not args.no_regime,
         enable_rs_filter=not args.no_rs,

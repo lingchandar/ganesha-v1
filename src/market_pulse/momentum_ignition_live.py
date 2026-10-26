@@ -29,12 +29,26 @@ class MomentumIgnitionLiveEngine:
     """Combine daily ignition predictions with live intraday confirmation."""
 
     STATUS_LOG_INTERVAL_SECONDS = 60.0
+    # Safety gate for the current ignition model. This is intentionally
+    # configurable and will be replaced by the validated Entry ML gate later.
+    MIN_ENTRY_PROBABILITY = 0.15
 
-    def __init__(self, scanner: LiveMarketScanner, *, watchlist: Optional[pd.DataFrame] = None, top_n: int = 10, status_logging: bool = True) -> None:
+    def __init__(
+        self,
+        scanner: LiveMarketScanner,
+        *,
+        watchlist: Optional[pd.DataFrame] = None,
+        top_n: int = 10,
+        min_entry_probability: float = MIN_ENTRY_PROBABILITY,
+        status_logging: bool = True,
+    ) -> None:
         if top_n < 1:
             raise ValueError("top_n must be >= 1")
+        if not 0.0 <= min_entry_probability <= 1.0:
+            raise ValueError("min_entry_probability must be between 0 and 1")
         self.scanner = scanner
         self.top_n = top_n
+        self.min_entry_probability = min_entry_probability
         self.status_logging = status_logging
         self._watchlist: dict[str, tuple[float, int]] = {}
         self._latest_decisions: dict[str, MomentumIgnitionLiveDecision] = {}
@@ -120,7 +134,10 @@ class MomentumIgnitionLiveEngine:
             action, probability, rank = "AVOID", 0.0, None
         else:
             probability, rank = model_signal
-            action = "ENTRY" if snapshot.momentum_event else "WATCH"
+            if probability < self.min_entry_probability:
+                action = "WATCH"
+            else:
+                action = "ENTRY" if snapshot.momentum_event else "WATCH"
         return MomentumIgnitionLiveDecision(
             ticker_symbol=snapshot.ticker_symbol,
             ignition_probability=probability,

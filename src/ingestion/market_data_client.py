@@ -13,7 +13,7 @@ STRUCTURAL GUARANTEE:
 """
 import httpx
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from typing import Dict, List, Optional
 import pandas as pd
 from loguru import logger
@@ -29,6 +29,7 @@ class MarketDataClient:
     """
 
     FYERS_DATA_URL = "https://api-t1.fyers.in/data"
+    MAX_DAILY_HISTORY_DAYS = 366
 
     def __init__(self):
         self.broker = settings.broker_name.lower()
@@ -79,7 +80,11 @@ class MarketDataClient:
         resolution: str = "D",
     ) -> pd.DataFrame:
         """
-        Fetch historical daily OHLCV candle data from Fyers API v3.
+        Fetch historical OHLCV candle data from Fyers API v3.
+
+        FYERS limits daily/weekly/monthly history requests to 366 calendar days
+        per request, so longer ranges are fetched in sequential chunks and then
+        combined. This keeps the caller's requested range intact.
 
         Args:
             symbol: Fyers format symbol, e.g. "NSE:RELIANCE-EQ" or "NSE:NIFTY50-INDEX"
@@ -94,36 +99,73 @@ class MarketDataClient:
             raise RuntimeError(
                 "MarketDataClient is unauthenticated. Call authenticate() with a valid token first."
             )
+        if from_date > to_date:
+            raise ValueError("from_date must be <= to_date")
 
         url = f"{self.FYERS_DATA_URL}/history"
-        params = {
-            "symbol": symbol,
-            "resolution": resolution,
-            "date_format": "1",  # YYYY-MM-DD
-            "range_from": from_date.strftime("%Y-%m-%d"),
-            "range_to": to_date.strftime("%Y-%m-%d"),
-            "cont_flag": "1",
-        }
+        frames: list[pd.DataFrame] = []
+        chunk_start = from_date
 
         try:
-            resp = self._safe_request("GET", url, params=params)
-            data = resp.json()
+            while chunk_start <= to_date:
+                chunk_end = min(
+                    chunk_start + timedelta(days=self.MAX_DAILY_HISTORY_DAYS - 1),
+                    to_date,
+                )
+                params = {
+                    "symbol": symbol,
+                    "resolution": resolution,
+                    "date_format": "1",  # YYYY-MM-DD
+                    "range_from": chunk_start.strftime("%Y-%m-%d"),
+                    "range_to": chunk_end.strftime("%Y-%m-%d"),
+                    "cont_flag": "1",
+                }
 
-            if data.get("s") != "ok" or "candles" not in data:
-                logger.warning(f"No candles returned for {symbol}: {data.get('message', 'Unknown response')}")
+                resp = self._safe_request("GET", url, params=params)
+                data = resp.json()
+
+                if data.get("s") != "ok" or "candles" not in data:
+                    logger.warning(
+                        f"No candles returned for {symbol} ({chunk_start} to {chunk_end}): "
+                        f"{data.get('message', 'Unknown response')}"
+                    )
+                else:
+                    raw_candles = data["candles"]
+                    if raw_candles:
+                        frame = pd.DataFrame(
+                            raw_candles,
+                            columns=[
+                                "epoch_time",
+                                "open_price",
+                                "high_price",
+                                "low_price",
+                                "close_price",
+                                "volume_traded",
+                            ],
+                        )
+                        frame["timestamp"] = (
+                            pd.to_datetime(frame["epoch_time"], unit="s", utc=True)
+                            .dt.tz_convert("Asia/Kolkata")
+                        )
+                        frame = frame.drop(columns=["epoch_time"])
+                        frames.append(frame)
+                        logger.info(
+                            f"Fetched {len(frame)} candles for {symbol} "
+                            f"({chunk_start} to {chunk_end})"
+                        )
+
+                chunk_start = chunk_end + timedelta(days=1)
+
+            if not frames:
                 return pd.DataFrame()
 
-            raw_candles = data["candles"]
-            # Fyers candle structure: [epoch_sec, open, high, low, close, volume]
-            df = pd.DataFrame(
-                raw_candles,
-                columns=["epoch_time", "open_price", "high_price", "low_price", "close_price", "volume_traded"]
+            df = pd.concat(frames, ignore_index=True)
+            df = (
+                df.sort_values("timestamp")
+                .drop_duplicates(subset=["timestamp"], keep="last")
+                .reset_index(drop=True)
             )
-            df["timestamp"] = pd.to_datetime(df["epoch_time"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata")
-            df = df.drop(columns=["epoch_time"])
-            df = df.sort_values("timestamp").reset_index(drop=True)
-
-            logger.info(f"Fetched {len(df)} candles for {symbol} ({from_date} to {to_date})")
+            logger.info(f"Fetched {len(df)} candles total for {symbol} ({from_date} to {to_date})")
             return df
 
         except Exception as e:

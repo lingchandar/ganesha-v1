@@ -19,7 +19,7 @@ from src.backtest.report_generator import BacktestReportGenerator
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run GANESHA V1 Institutional Historical Backtest.")
     parser.add_argument("--capital", type=float, default=500_000.0, help="Initial capital in INR (default: 500,000)")
-    parser.add_argument("--risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default: 0.01 = 1%)")
+    parser.add_argument("--risk-pct", type=float, default=0.01, help="Max risk fraction per trade (default: 0.01 = 1 percent)")
     parser.add_argument("--max-positions", type=int, default=5, help="Max concurrent positions (default: 5)")
     parser.add_argument("--max-sector", type=int, default=2, help="Max positions per sector (default: 2)")
     parser.add_argument("--no-friction", action="store_true", help="Disable statutory delivery friction deduction")

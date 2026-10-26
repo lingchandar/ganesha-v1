@@ -90,6 +90,8 @@ class LiveAnalysisEngine:
         self.analysis_buffers = LiveOHLCVBuffer(max_candles=max_candles)
         self.scanner = scanner or SwingSetupScanner()
         self.signal_handler = signal_handler
+        # Retained as the single paper-trade lifecycle owner for downstream use;
+        # this engine itself never opens a trade.
         self.trade_manager = trade_manager or ActiveTradeManager()
         self._working_days: dict[str, _WorkingDailyCandle] = {}
         self._finalized_sessions: dict[str, date] = {}
@@ -112,7 +114,8 @@ class LiveAnalysisEngine:
             raise ValueError("lookback_days must be >= 1")
 
         calendar_days = max(int(lookback_days), self.DEFAULT_WARMUP_CALENDAR_DAYS)
-        end = date.today() - timedelta(days=1)
+        # Use India session date rather than the host machine's UTC date.
+        end = datetime.now(IST).date() - timedelta(days=1)
         start = end - timedelta(days=calendar_days)
 
         history = client.fetch_historical_candles(

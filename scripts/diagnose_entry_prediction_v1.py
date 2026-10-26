@@ -1,12 +1,8 @@
 """Diagnostic validation for entry prediction v1.
 
-This script deliberately does not train a new model or change production code.
-It inspects the existing leakage-safe OOS predictions from the strategy evaluator
-and reports where ranking quality is being lost: fold, setup, deduplication,
-and simple non-ML baselines.
-
-The script expects the evaluator's prediction CSV to be supplied explicitly so
-runtime data remains outside version control.
+Consumes the leakage-safe OOS prediction file produced by the strategy
+validator. This is diagnostic only: it does not change live/backtest behavior
+or introduce a production threshold.
 """
 from __future__ import annotations
 
@@ -18,7 +14,17 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 
-def _metric(frame: pd.DataFrame, score_col: str = "prediction") -> dict[str, float]:
+def _score_column(frame: pd.DataFrame) -> str:
+    """Return the evaluator's probability column without renaming data blindly."""
+    if "prediction" in frame.columns:
+        return "prediction"
+    if "probability" in frame.columns:
+        return "probability"
+    raise ValueError("Missing prediction score column: expected 'probability' or 'prediction'")
+
+
+def _metric(frame: pd.DataFrame, score_col: str | None = None) -> dict[str, float]:
+    score_col = score_col or _score_column(frame)
     frame = frame.dropna(subset=[score_col, "label_target_before_stop"])
     if frame.empty or frame["label_target_before_stop"].nunique() < 2:
         return {"rows": float(len(frame)), "auc": np.nan, "ap": np.nan}
@@ -29,12 +35,13 @@ def _metric(frame: pd.DataFrame, score_col: str = "prediction") -> dict[str, flo
     }
 
 
-def _daily_top_k(frame: pd.DataFrame, k: int) -> tuple[float, float, int]:
+def _daily_top_k(frame: pd.DataFrame, k: int, score_col: str | None = None) -> tuple[float, float, int]:
+    score_col = score_col or _score_column(frame)
     hits: list[float] = []
-    for _, day in frame.groupby("trade_date"):
-        day = day.sort_values("prediction", ascending=False).head(k)
-        if len(day):
-            hits.append(float(day["label_target_before_stop"].mean()))
+    for _, day in frame.groupby("trade_date", sort=True):
+        ranked = day.sort_values(score_col, ascending=False).head(k)
+        if len(ranked):
+            hits.append(float(ranked["label_target_before_stop"].mean()))
     if not hits:
         return np.nan, np.nan, 0
     base = float(frame["label_target_before_stop"].mean())
@@ -48,9 +55,9 @@ def main() -> None:
     args = parser.parse_args()
 
     df = pd.read_csv(args.predictions)
+    score_col = _score_column(df)
     required = {
-        "trade_date", "ticker_symbol", "setup_type", "label_target_before_stop",
-        "prediction", "fold",
+        "trade_date", "ticker_symbol", "setup_type", "label_target_before_stop", "fold",
     }
     missing = required - set(df.columns)
     if missing:
@@ -60,31 +67,32 @@ def main() -> None:
     df = df.sort_values(["trade_date", "ticker_symbol", "setup_type"]).reset_index(drop=True)
 
     print("ENTRY_PREDICTION_V1_DIAGNOSTICS")
+    print(f"score_column={score_col}")
     print(f"rows={len(df)} dates={df.trade_date.nunique()} tickers={df.ticker_symbol.nunique()}")
-    print(f"pooled={_metric(df)}")
+    print(f"pooled={_metric(df, score_col)}")
 
     print("\nFOLD_BY_FOLD")
     for fold, part in df.groupby("fold", sort=True):
-        print(f"fold={fold} {_metric(part)}")
+        print(f"fold={fold} {_metric(part, score_col)}")
 
     print("\nSETUP_BY_SETUP")
     for setup, part in df.groupby("setup_type", sort=True):
-        metric = _metric(part)
+        metric = _metric(part, score_col)
         print(f"setup={setup} {metric}")
 
     print("\nDEDUPLICATION_EFFECT")
-    raw = _metric(df)
+    raw = _metric(df, score_col)
     best = (
-        df.sort_values(["trade_date", "ticker_symbol", "prediction"], ascending=[True, True, False])
+        df.sort_values(["trade_date", "ticker_symbol", score_col], ascending=[True, True, False])
         .drop_duplicates(["trade_date", "ticker_symbol"], keep="first")
         .copy()
     )
     print(f"all_setups={raw}")
-    print(f"one_best_setup_per_ticker_day={_metric(best)} rows={len(best)}")
+    print(f"one_best_setup_per_ticker_day={_metric(best, score_col)} rows={len(best)}")
 
     print("\nDAILY_TOP_K_ON_RAW_OOS")
     for k in (1, 3, 5, 10):
-        rate, lift, days = _daily_top_k(df, k)
+        rate, lift, days = _daily_top_k(df, k, score_col)
         print(f"top_{k}=positive_rate={rate:.4f} lift={lift:.2f}x days={days}")
 
     print("\nBASELINE_RANKINGS")
@@ -103,7 +111,7 @@ def main() -> None:
         print(f"feature={col} auc={auc:.4f} inverse_auc={inverse:.4f}")
 
     print("\nRANKING_DIRECTION_CHECK")
-    auc = _metric(df)["auc"]
+    auc = _metric(df, score_col)["auc"]
     print(f"model_auc={auc:.4f} inverted_auc={1.0 - auc:.4f}" if not np.isnan(auc) else "model_auc=nan")
     print("No production decision is made by this diagnostic.")
 

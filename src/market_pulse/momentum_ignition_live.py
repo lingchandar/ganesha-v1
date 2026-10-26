@@ -1,4 +1,10 @@
-"""Bridge the daily Momentum Ignition model to live FYERS confirmation."""
+"""Bridge the daily Momentum Ignition model to live FYERS confirmation.
+
+Momentum Ignition is a candidate-generation layer only.  It must never
+create a tradable ENTRY decision by itself.  Final entry approval belongs to
+the centralized entry gate after Entry Prediction, eligibility, and risk
+checks have been validated.
+"""
 from __future__ import annotations
 
 import time
@@ -26,12 +32,13 @@ class MomentumIgnitionLiveDecision:
 
 
 class MomentumIgnitionLiveEngine:
-    """Combine daily ignition predictions with live intraday confirmation."""
+    """Generate a ranked live watchlist and confirmation state.
+
+    This class intentionally cannot emit ``ENTRY``.  A momentum event is
+    evidence for confirmation, not a trade authorization.
+    """
 
     STATUS_LOG_INTERVAL_SECONDS = 60.0
-    # Safety gate for the current ignition model. This is intentionally
-    # configurable and will be replaced by the validated Entry ML gate later.
-    MIN_ENTRY_PROBABILITY = 0.15
 
     def __init__(
         self,
@@ -39,16 +46,12 @@ class MomentumIgnitionLiveEngine:
         *,
         watchlist: Optional[pd.DataFrame] = None,
         top_n: int = 10,
-        min_entry_probability: float = MIN_ENTRY_PROBABILITY,
         status_logging: bool = True,
     ) -> None:
         if top_n < 1:
             raise ValueError("top_n must be >= 1")
-        if not 0.0 <= min_entry_probability <= 1.0:
-            raise ValueError("min_entry_probability must be between 0 and 1")
         self.scanner = scanner
         self.top_n = top_n
-        self.min_entry_probability = min_entry_probability
         self.status_logging = status_logging
         self._watchlist: dict[str, tuple[float, int]] = {}
         self._latest_decisions: dict[str, MomentumIgnitionLiveDecision] = {}
@@ -60,17 +63,6 @@ class MomentumIgnitionLiveEngine:
     def _on_live_snapshot(self, snapshot: LiveScannerSnapshot) -> None:
         decision = self.evaluate_snapshot(snapshot)
         self._latest_decisions[snapshot.ticker_symbol] = decision
-        if decision.action == "ENTRY":
-            print(
-                "MOMENTUM_IGNITION_ENTRY "
-                f"ticker={decision.ticker_symbol} "
-                f"probability={decision.ignition_probability:.4f} "
-                f"price={decision.price:.2f} "
-                f"return_3m={decision.return_3m_pct:.2f}% "
-                f"return_5m={decision.return_5m_pct:.2f}% "
-                f"volume_ratio={decision.session_volume_ratio:.2f}x "
-                f"range_ratio={decision.range_ratio:.2f}x"
-            )
         self._maybe_log_status()
 
     def _maybe_log_status(self) -> None:
@@ -80,7 +72,11 @@ class MomentumIgnitionLiveEngine:
         if now - self._last_status_log < self.STATUS_LOG_INTERVAL_SECONDS:
             return
         self._last_status_log = now
-        decisions = [self._latest_decisions[symbol] for symbol in self._watchlist if symbol in self._latest_decisions]
+        decisions = [
+            self._latest_decisions[symbol]
+            for symbol in self._watchlist
+            if symbol in self._latest_decisions
+        ]
         if not decisions:
             return
         decisions.sort(key=lambda item: item.watchlist_rank or 999)
@@ -123,7 +119,10 @@ class MomentumIgnitionLiveEngine:
 
     def process_tick(self, tick) -> Optional[MomentumIgnitionLiveDecision]:
         self.scanner.process_tick(tick)
-        snapshot = next((item for item in self.scanner.snapshots() if item.ticker_symbol == tick.symbol), None)
+        snapshot = next(
+            (item for item in self.scanner.snapshots() if item.ticker_symbol == tick.symbol),
+            None,
+        )
         if snapshot is None:
             return None
         return self.evaluate_snapshot(snapshot)
@@ -134,10 +133,7 @@ class MomentumIgnitionLiveEngine:
             action, probability, rank = "AVOID", 0.0, None
         else:
             probability, rank = model_signal
-            if probability < self.min_entry_probability:
-                action = "WATCH"
-            else:
-                action = "ENTRY" if snapshot.momentum_event else "WATCH"
+            action = "CONFIRMATION" if snapshot.momentum_event else "WATCH"
         return MomentumIgnitionLiveDecision(
             ticker_symbol=snapshot.ticker_symbol,
             ignition_probability=probability,
@@ -158,7 +154,8 @@ class MomentumIgnitionLiveEngine:
         return tuple(with_live.values())
 
     def entry_candidates(self) -> tuple[MomentumIgnitionLiveDecision, ...]:
-        return tuple(decision for decision in self.decisions() if decision.action == "ENTRY")
+        """Return no trades: final entry authorization is handled elsewhere."""
+        return tuple()
 
     def connect(self) -> None:
         self.scanner.connect()

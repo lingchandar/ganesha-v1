@@ -52,6 +52,7 @@ class BacktestConfig:
     min_warmup_bars: int = 300
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    setup_type_filter: Optional[str] = None
 
 
 @dataclass
@@ -454,6 +455,12 @@ class BacktestEngine:
                 delivery_history=delivery_history,
                 is_expiry_week=is_expiry_week,
             )
+            if self.config.setup_type_filter:
+                signals = [
+                    signal
+                    for signal in signals
+                    if signal.setup_type == self.config.setup_type_filter
+                ]
             if not signals:
                 continue
 

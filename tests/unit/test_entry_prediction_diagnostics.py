@@ -1,6 +1,6 @@
 import pandas as pd
 
-from scripts.diagnose_entry_prediction_v1 import _metric, _daily_top_k
+from scripts.diagnose_entry_prediction_v1 import _daily_top_k, _metric
 
 
 def test_metric_detects_perfect_ranking():

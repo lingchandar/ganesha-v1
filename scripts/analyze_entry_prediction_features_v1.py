@@ -1,9 +1,4 @@
-"""Leakage-safe diagnosis of entry prediction v1 feature signal.
-
-This analysis does not train or modify the production model. It answers whether
-individual features or setup priors contain useful out-of-sample signal and
-whether the current model is adding information beyond simple baselines.
-"""
+"""Leakage-safe diagnosis of entry prediction v1 feature signal."""
 from __future__ import annotations
 
 import argparse
@@ -53,47 +48,35 @@ def main() -> None:
     print("ENTRY_PREDICTION_V1_FEATURE_ANALYSIS")
     print(f"rows={len(merged)} features={len(PredictionFeatureBuilder.FEATURE_COLUMNS)}")
     print("\nMODEL_VS_SIMPLE_BASELINES")
-    model_auc = _auc(merged["label_target_before_stop"], merged[score_col])
-    model_ap = _ap(merged["label_target_before_stop"], merged[score_col])
-    print(f"model auc={model_auc:.4f} ap={model_ap:.4f}")
+    print(f"model auc={_auc(merged['label_target_before_stop'], merged[score_col]):.4f} ap={_ap(merged['label_target_before_stop'], merged[score_col]):.4f}")
 
-    # Leakage-safe setup prior: estimate setup success rates using each fold's training set.
+    # Use exact chronological folds, including the 15-session purge, rather than
+    # reconstructing training dates from OOS fold numbers.
     print("\nSETUP_PRIOR_BY_FOLD")
+    folds = _folds(df.sort_values(["trade_date", "ticker_symbol", "setup_type"]).reset_index(drop=True))
     setup_rows = []
-    for fold, valid in merged.groupby("fold", sort=True):
-        train_dates = sorted(merged.loc[merged["fold"] < fold, "trade_date"].unique())
-        train = df[df["trade_date"].isin(train_dates)] if train_dates else df.iloc[0:0]
-        if train.empty:
-            continue
+    for fold_number, (train, valid) in enumerate(folds, start=1):
+        valid = valid.merge(pred[KEYS + ["fold"]], on=KEYS, how="inner", validate="one_to_one")
         priors = train.groupby("setup_type")["label_target_before_stop"].mean()
-        score = valid["setup_type"].map(priors).fillna(train["label_target_before_stop"].mean())
-        setup_rows.append((fold, _auc(valid["label_target_before_stop"], score), _ap(valid["label_target_before_stop"], score)))
+        score = valid["setup_type"].map(priors).fillna(float(train["label_target_before_stop"].mean()))
+        setup_rows.append((fold_number, _auc(valid["label_target_before_stop"], score), _ap(valid["label_target_before_stop"], score)))
     for fold, auc, ap in setup_rows:
         print(f"fold={fold} setup_prior_auc={auc:.4f} setup_prior_ap={ap:.4f}")
 
     print("\nUNIVARIATE_OOS_FEATURES")
     rows = []
     for feature in PredictionFeatureBuilder.FEATURE_COLUMNS:
-        aucs = []
-        for fold, valid in merged.groupby("fold", sort=True):
-            # Feature is point-in-time and evaluated only on that fold's OOS rows.
-            aucs.append(_auc(valid["label_target_before_stop"], valid[feature]))
+        aucs = [_auc(valid["label_target_before_stop"], valid[feature]) for _, valid in merged.groupby("fold", sort=True)]
         aucs = [x for x in aucs if not np.isnan(x)]
         if aucs:
-            strength = max(float(np.mean(aucs)), 1.0 - float(np.mean(aucs)))
-            rows.append((feature, float(np.mean(aucs)), strength, len(aucs)))
+            mean_auc = float(np.mean(aucs))
+            rows.append((feature, mean_auc, max(mean_auc, 1.0 - mean_auc), len(aucs)))
     rows.sort(key=lambda x: x[2], reverse=True)
-    for feature, mean_auc, direction_free_auc, folds in rows:
-        print(f"feature={feature} mean_auc={mean_auc:.4f} direction_free_auc={direction_free_auc:.4f} folds={folds}")
+    for feature, mean_auc, direction_free_auc, fold_count in rows:
+        print(f"feature={feature} mean_auc={mean_auc:.4f} direction_free_auc={direction_free_auc:.4f} folds={fold_count}")
 
     print("\nSETUP_DISTRIBUTION")
-    print(
-        merged.groupby("setup_type")["label_target_before_stop"]
-        .agg(rows="size", positive_rate="mean")
-        .sort_values("rows", ascending=False)
-        .to_string()
-    )
-
+    print(merged.groupby("setup_type")["label_target_before_stop"].agg(rows="size", positive_rate="mean").sort_values("rows", ascending=False).to_string())
     print("\nCONCLUSION_GUIDANCE")
     print("If setup priors or a small number of features beat the model, simplify before rebuilding.")
     print("If nearly every feature is near-random OOS, revisit labels/setup definitions before adding model complexity.")

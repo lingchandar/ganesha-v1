@@ -18,7 +18,7 @@ DEFAULT_DATASET = Path("data/prediction/entry_prediction_dataset_v1.csv")
 
 
 def audit(dataset_path: Path) -> None:
-    df = pd.read_csv(dataset_path, parse_dates=["trade_date"])
+    df = pd.read_csv(dataset_path)
     required = [
         "trade_date",
         "ticker_symbol",
@@ -33,6 +33,8 @@ def audit(dataset_path: Path) -> None:
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Dataset missing columns: {missing}")
+
+    df["trade_date"] = pd.to_datetime(df["trade_date"])
 
     unresolved = df[df["outcome_valid"] == 0].copy()
     if unresolved.empty:

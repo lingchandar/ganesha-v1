@@ -48,7 +48,7 @@ def feed_confirmation(scanner):
         scanner.process_tick(tick("NSE:TRENT-EQ", minute, price, volume))
 
 
-def test_watchlist_signal_becomes_entry_after_live_confirmation():
+def test_watchlist_signal_becomes_confirmation_after_live_confirmation():
     scanner = make_scanner()
     watchlist = pd.DataFrame(
         {
@@ -65,8 +65,8 @@ def test_watchlist_signal_becomes_entry_after_live_confirmation():
     assert decision.ignition_probability == 0.2947
     assert decision.watchlist_rank == 1
     assert decision.momentum_event is True
-    assert decision.action == "ENTRY"
-    assert engine.entry_candidates()[0].ticker_symbol == "NSE:TRENT-EQ"
+    assert decision.action == "CONFIRMATION"
+    assert engine.entry_candidates() == ()
 
 
 def test_watchlist_without_confirmation_is_watch():

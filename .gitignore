@@ -25,6 +25,10 @@ audit_logs/
 # ML models (large binary files)
 models/
 
+# Runtime-generated prediction data
+/data/prediction/
+/fyersDataSocket.log
+
 # OS
 Thumbs.db
 .DS_Store

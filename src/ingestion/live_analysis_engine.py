@@ -1,4 +1,9 @@
-"""Live FYERS candle -> swing analysis pipeline."""
+"""Live FYERS candle -> swing analysis pipeline.
+
+The live monitor is intentionally read-only.  It may surface validated setup
+candidates, but it must never create a paper/live position by bypassing the
+centralized entry authorization path.
+"""
 
 from __future__ import annotations
 
@@ -12,14 +17,21 @@ from src.ingestion.market_data_client import MarketDataClient
 from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 from src.ingestion.timeframe_aggregator import TimeframeAggregator
 from src.risk.active_trade_manager import ActiveTradeManager
-from src.risk.position_sizer import PositionSizingEngine
-from src.risk.circuit_breakers import PortfolioCircuitBreakers
 from src.setups.swing_setups import SwingSetupSignal
 from src.setups.swing_setups import SwingSetupScanner
 
 
 class LiveAnalysisEngine:
-    """Warm up from FYERS history, then continue from completed live candles."""
+    """Warm up from FYERS history, then surface setup candidates read-only.
+
+    The validated Ganesha swing methodology currently uses ``TREND_PULLBACK``
+    as its live-validation setup.  This engine therefore filters out every
+    other setup.  Position creation is deliberately not performed here:
+    final authorization belongs to the centralized entry gate after all
+    required eligibility, prediction, and risk conditions are available.
+    """
+
+    DEFAULT_SETUP_TYPE = "TREND_PULLBACK"
 
     def __init__(
         self,
@@ -29,16 +41,21 @@ class LiveAnalysisEngine:
         scanner: Optional[SwingSetupScanner] = None,
         signal_handler: Optional[Callable[[str, list], None]] = None,
         trade_manager: Optional[ActiveTradeManager] = None,
-        position_sizer=PositionSizingEngine,
-        circuit_breakers=PortfolioCircuitBreakers,
+        setup_type_filter: str = DEFAULT_SETUP_TYPE,
     ) -> None:
         if min_candles < 60:
             raise ValueError("min_candles must be >= 60 for the swing scanner")
         if max_candles < min_candles:
             raise ValueError("max_candles must be >= min_candles")
+        if setup_type_filter != self.DEFAULT_SETUP_TYPE:
+            raise ValueError(
+                "Live swing validation is locked to TREND_PULLBACK until another setup "
+                "passes the same historical validation standard."
+            )
 
         self.min_candles = min_candles
         self.analysis_timeframe_minutes = analysis_timeframe_minutes
+        self.setup_type_filter = setup_type_filter
         self.source_buffer = LiveOHLCVBuffer(
             max_candles=max_candles * analysis_timeframe_minutes
         )
@@ -47,8 +64,6 @@ class LiveAnalysisEngine:
         self.scanner = scanner or SwingSetupScanner()
         self.signal_handler = signal_handler
         self.trade_manager = trade_manager or ActiveTradeManager()
-        self.position_sizer = position_sizer
-        self.circuit_breakers = circuit_breakers
 
     def warm_up(self, symbol: str, client: MarketDataClient, lookback_days: int = 7) -> int:
         """Load completed analysis candles from FYERS before live monitoring starts."""
@@ -83,7 +98,13 @@ class LiveAnalysisEngine:
         return self.analysis_buffers.count(symbol)
 
     def on_candle(self, candle: OneMinuteCandle) -> list:
-        """Accept a completed 1-minute candle and scan on completed analysis bars."""
+        """Accept a completed 1-minute candle and surface Trend Pullback candidates.
+
+        No position is opened here.  In particular, this method must not turn a
+        setup signal into an entry merely because sizing or circuit-breaker
+        checks happen to pass; the centralized entry gate is the only valid
+        authorization boundary.
+        """
         self.source_buffer.add(candle)
         source_df = self.source_buffer.get(candle.symbol)
         analysis_df = self.aggregator.aggregate(source_df)
@@ -117,48 +138,12 @@ class LiveAnalysisEngine:
             ticker_symbol=candle.symbol,
             df=df,
         )
-
-        # Register the first qualifying signal as a paper trade. A symbol can
-        # have only one active position; repeated setup detections are ignored
-        # by ActiveTradeManager rather than creating duplicate positions.
-        if signals:
-            for signal in signals:
-                if not isinstance(signal, SwingSetupSignal):
-                    continue
-                if self.trade_manager.has_active_trade(candle.symbol):
-                    break
-                try:
-                    sizing = self.position_sizer.calculate_position_size(
-                        ticker_symbol=signal.ticker_symbol,
-                        entry_price=float(signal.entry_price),
-                        stop_loss=float(signal.stop_loss),
-                        target_price=float(signal.target_price),
-                    )
-                    if not sizing.is_executable:
-                        continue
-
-                    active_positions = [{
-                        "ticker_symbol": trade.ticker_symbol,
-                        "sector": "UNKNOWN",
-                        "capital_at_risk_net_inr": trade.shares * (trade.entry_price - trade.stop_loss),
-                    } for trade in self.trade_manager.active_trades.values()]
-                    capacity = self.circuit_breakers.evaluate_candidate_capacity(
-                        active_positions=active_positions,
-                        candidate_ticker=signal.ticker_symbol,
-                        candidate_sector="UNKNOWN",
-                        candidate_risk_inr=sizing.capital_at_risk_net_inr,
-                    )
-                    if not capacity.is_allowed:
-                        continue
-
-                    self.trade_manager.open_trade(
-                        signal=signal,
-                        entry_date=latest["timestamp"].date(),
-                        shares=sizing.shares_to_buy,
-                    )
-                except ValueError:
-                    # Invalid/duplicate setup must never break the live feed.
-                    continue
+        signals = [
+            signal
+            for signal in signals
+            if isinstance(signal, SwingSetupSignal)
+            and signal.setup_type == self.setup_type_filter
+        ]
 
         if self.signal_handler:
             self.signal_handler(candle.symbol, signals)

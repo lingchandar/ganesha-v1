@@ -327,7 +327,22 @@ class BacktestEngine:
 
             if is_filled:
                 capital_needed = order.shares * fill_price
-                entry_friction = order.estimated_entry_friction_inr if self.config.enable_friction else 0.0
+                if self.config.enable_friction:
+                    # Recalculate entry friction from the actual execution price.
+                    # calculate_statutory_friction() is a round-trip calculator, so
+                    # remove only the flat DP charge when deriving the entry leg.
+                    entry_fric_breakdown = PositionSizingEngine.calculate_statutory_friction(
+                        shares=order.shares,
+                        entry_price=fill_price,
+                        exit_price=0.0,
+                    )
+                    entry_friction = max(
+                        entry_fric_breakdown.total_friction_inr
+                        - PositionSizingEngine.FLAT_DP_CHARGE,
+                        0.0,
+                    )
+                else:
+                    entry_friction = 0.0
 
                 total_cash_needed = capital_needed + entry_friction
                 if self.cash >= total_cash_needed:

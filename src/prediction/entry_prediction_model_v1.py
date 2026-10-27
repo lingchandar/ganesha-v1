@@ -16,6 +16,7 @@ from src.prediction.engine import PredictionFeatureBuilder
 
 MODEL_VERSION = "entry_prediction_v1"
 LABEL_COLUMN = "label_target_before_stop"
+LABEL_POLICY = "target_before_stop_within_15_sessions_unresolved_as_loss"
 PURGE_SESSIONS = 15
 CALIBRATION_SESSIONS = 60
 CALIBRATION_GAP = PURGE_SESSIONS
@@ -134,10 +135,11 @@ def train(dataset_path: Path, model_path: Path) -> dict:
     if missing:
         raise ValueError(f"Dataset missing columns: {missing}")
 
-    df = df[df["outcome_valid"] == 1].copy()
+    # The label is target-before-stop within the full 15-session horizon.
+    # If neither barrier is reached, that is a valid negative outcome, not censoring.
     df = df.sort_values(["trade_date", "ticker_symbol", "setup_type"]).reset_index(drop=True)
     if len(df) < 1000:
-        raise ValueError(f"Too few valid entry examples: {len(df)}")
+        raise ValueError(f"Too few entry examples: {len(df)}")
 
     metrics = evaluate_dataset(df)
     mean_auc = float(np.mean([m.auc for m in metrics]))
@@ -151,6 +153,7 @@ def train(dataset_path: Path, model_path: Path) -> dict:
     final_model.fit(df[features], df[LABEL_COLUMN])
     bundle = {
         "model_version": MODEL_VERSION,
+        "label_policy": LABEL_POLICY,
         "feature_columns": features,
         "model": final_model,
         "production_ready": production_ready,
@@ -170,6 +173,7 @@ def train(dataset_path: Path, model_path: Path) -> dict:
     joblib.dump(bundle, model_path)
 
     print(f"model_version={MODEL_VERSION}")
+    print(f"label_policy={LABEL_POLICY}")
     print(f"rows={len(df)} folds={len(metrics)}")
     print(f"mean_auc={mean_auc:.4f} mean_ap={mean_ap:.4f} mean_brier={mean_brier:.4f}")
     print("mean_top_lift=" + " ".join(f"{k}={v:.2f}" for k, v in mean_lifts.items()))

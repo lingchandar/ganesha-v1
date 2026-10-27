@@ -1,13 +1,12 @@
-"""Validate the candidate model on the same historical signal population used for training.
+"""Validate the candidate model on the historical signal population used for training.
 
-The live shadow replay intentionally observes only TREND_PULLBACK because the live
-engine currently locks production setup selection to that setup. The training
-population, however, is built from all six validated setup detectors. This harness
-therefore evaluates the candidate model directly against the historical population
-used by the dataset builder, while fetching real daily candles from FYERS.
+The live shadow replay currently observes only TREND_PULLBACK because the live
+engine locks production setup selection to that setup. This harness can evaluate
+all six training setup detectors or one selected setup so model quality can be
+measured against the actual live population.
 
-This is diagnostic only. It does not change EntryGate, production thresholds, or
-live order behaviour.
+Diagnostic only. It does not change EntryGate, production thresholds, or live
+order behaviour.
 """
 from __future__ import annotations
 
@@ -31,9 +30,17 @@ IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_MODEL = Path("models/entry_prediction_extra_trees_candidate_v1.joblib")
 DEFAULT_OUTPUT = Path("data/prediction/historical_population_shadow_v1.csv")
 HORIZON_SESSIONS = 15
-REPLAY_SESSIONS = 180
+REPLAY_SESSIONS = 360
 WARMUP_SESSIONS = 320
 CALENDAR_LOOKBACK_DAYS = 1100
+SETUP_CHOICES = (
+    "CLASSIC_RESISTANCE_BREAKOUT",
+    "BREAKOUT_RETEST",
+    "TREND_PULLBACK",
+    "DEMAND_SUPPORT_BOUNCE",
+    "TREND_CONTINUATION_FLAG",
+    "RS_LEADER_BREAKOUT",
+)
 
 
 def _value(signal: Any, name: str, default: Any = None) -> Any:
@@ -108,7 +115,7 @@ def _load_model(path: Path) -> dict:
     return bundle
 
 
-def evaluate_symbol(symbol: str, sessions: int, bundle: dict) -> list[dict]:
+def evaluate_symbol(symbol: str, sessions: int, bundle: dict, setup_type: Optional[str]) -> list[dict]:
     end_date = datetime.now(IST).date() - timedelta(days=1)
     start_date = end_date - timedelta(days=CALENDAR_LOOKBACK_DAYS)
 
@@ -132,6 +139,8 @@ def evaluate_symbol(symbol: str, sessions: int, bundle: dict) -> list[dict]:
     for i in range(start_idx, replay_end):
         window = features.iloc[: i + 1]
         signals = _candidate_signals(symbol, window)
+        if setup_type is not None:
+            signals = [s for s in signals if str(_value(s, "setup_type", "")) == setup_type]
         for signal in signals:
             outcome = _label(features, i, signal)
             if outcome is None:
@@ -157,7 +166,8 @@ def evaluate_symbol(symbol: str, sessions: int, bundle: dict) -> list[dict]:
                 }
             )
 
-    print(f"POPULATION REPLAY | {symbol} | candidates={len(rows)} | replay_sessions={sessions}")
+    label = setup_type or "ALL_SETUPS"
+    print(f"POPULATION REPLAY | {symbol} | setup={label} | candidates={len(rows)} | replay_sessions={sessions}")
     return rows
 
 
@@ -172,14 +182,16 @@ def _lift(frame: pd.DataFrame, fraction: float) -> Optional[float]:
     return float(top["label_target_before_stop"].mean() / baseline)
 
 
-def summarize(frame: pd.DataFrame) -> None:
+def summarize(frame: pd.DataFrame, setup_type: Optional[str]) -> None:
     if frame.empty:
         print("DECISION: zero evaluable historical candidates; investigate setup population before model work.")
         return
 
     y = frame["label_target_before_stop"].astype(int)
     p = frame["probability_target_before_stop"].astype(float)
+    label = setup_type or "ALL_SETUPS"
     print("\n=== HISTORICAL POPULATION SHADOW EVALUATION ===")
+    print(f"population={label}")
     print(f"rows={len(frame)}")
     print(f"tickers={frame['ticker_symbol'].nunique()}")
     print(f"positive_rate={y.mean():.6f}")
@@ -193,8 +205,8 @@ def summarize(frame: pd.DataFrame) -> None:
     print(f"brier={brier_score_loss(y, p):.6f}")
     for pct in (0.01, 0.03, 0.05, 0.10):
         lift = _lift(frame, pct)
-        label = f"top_{int(pct * 100)}pct_lift"
-        print(f"{label}={lift:.6f}" if lift is not None else f"{label}=NA")
+        label_pct = f"top_{int(pct * 100)}pct_lift"
+        print(f"{label_pct}={lift:.6f}" if lift is not None else f"{label_pct}=NA")
 
     print("\nSETUP BREAKDOWN")
     print(
@@ -214,6 +226,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--symbols", nargs="+", required=True)
     parser.add_argument("--sessions", type=int, default=REPLAY_SESSIONS)
+    parser.add_argument("--setup-type", choices=SETUP_CHOICES, default=None)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
@@ -222,11 +235,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise ValueError("--sessions must be >= 1")
 
     bundle = _load_model(args.model)
-    print(f"=== GANESHA V1 HISTORICAL POPULATION | MODEL AVAILABLE: True ===")
+    label = args.setup_type or "ALL_SETUPS"
+    print(f"=== GANESHA V1 HISTORICAL POPULATION | MODEL AVAILABLE: True | SETUP: {label} ===")
 
     rows: list[dict] = []
     for symbol in args.symbols:
-        rows.extend(evaluate_symbol(symbol, args.sessions, bundle))
+        rows.extend(evaluate_symbol(symbol, args.sessions, bundle, args.setup_type))
 
     frame = pd.DataFrame(rows)
     if not frame.empty:
@@ -235,7 +249,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         frame.to_csv(args.output, index=False)
         print(f"HISTORICAL POPULATION LEDGER: {args.output} | rows={len(frame)}")
 
-    summarize(frame)
+    summarize(frame, args.setup_type)
     return 0
 
 

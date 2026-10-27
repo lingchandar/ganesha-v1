@@ -1,7 +1,17 @@
 import numpy as np
 import pandas as pd
 
-from src.prediction.entry_prediction_model_v1 import CALIBRATION_GAP, CALIBRATION_SESSIONS, LABEL_POLICY, _calibration_split, _folds, _top_lift
+from src.prediction.entry_prediction_model_v1 import (
+    CALIBRATION_GAP,
+    CALIBRATION_SESSIONS,
+    LABEL_POLICY,
+    PRODUCTION_OOS_MIN_AUC,
+    PRODUCTION_OOS_MIN_TOP_10_LIFT,
+    PRODUCTION_OOS_MIN_TOP_5_LIFT,
+    _calibration_split,
+    _folds,
+    _top_lift,
+)
 
 
 def test_top_lift_rewards_ranked_positive_examples():
@@ -44,3 +54,9 @@ def test_calibration_split_is_session_aware_and_purged():
 
 def test_label_policy_is_explicitly_complete_horizon():
     assert LABEL_POLICY == "target_before_stop_within_15_sessions_unresolved_as_loss"
+
+
+def test_pooled_oos_promotion_thresholds_are_stricter_than_fold_only():
+    assert PRODUCTION_OOS_MIN_AUC >= 0.60
+    assert PRODUCTION_OOS_MIN_TOP_5_LIFT >= 1.30
+    assert PRODUCTION_OOS_MIN_TOP_10_LIFT >= 1.20

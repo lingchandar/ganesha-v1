@@ -30,6 +30,8 @@ class MarketDataClient:
 
     FYERS_DATA_URL = "https://api-t1.fyers.in/data"
     MAX_DAILY_HISTORY_DAYS = 366
+    MAX_RATE_LIMIT_RETRIES = 4
+    RATE_LIMIT_BACKOFF_SECONDS = (2.0, 5.0, 10.0, 20.0)
 
     def __init__(self):
         self.broker = settings.broker_name.lower()
@@ -40,20 +42,35 @@ class MarketDataClient:
 
     def _safe_request(self, method: str, url: str, **kwargs) -> httpx.Response:
         """
-        Inspect URL through SEBI compliance interceptor and apply rate limit throttle.
+        Inspect URL through SEBI compliance interceptor, apply the normal throttle,
+        and retry HTTP 429 responses with bounded backoff.
         """
         intercept_outbound_request(url)
-        throttle.wait_for_slot()
 
-        # Inject Authorization header if token exists
         if self._auth_token:
             headers = kwargs.pop("headers", {})
             headers["Authorization"] = f"{settings.fyers_app_id}:{self._auth_token}"
             kwargs["headers"] = headers
 
-        response = self._session.request(method, url, **kwargs)
-        response.raise_for_status()
-        return response
+        for attempt in range(self.MAX_RATE_LIMIT_RETRIES + 1):
+            throttle.wait_for_slot()
+            response = self._session.request(method, url, **kwargs)
+
+            if response.status_code != 429:
+                response.raise_for_status()
+                return response
+
+            if attempt >= self.MAX_RATE_LIMIT_RETRIES:
+                response.raise_for_status()
+
+            delay = self.RATE_LIMIT_BACKOFF_SECONDS[attempt]
+            logger.warning(
+                f"FYERS rate limit (429) for {url}; retry {attempt + 1}/"
+                f"{self.MAX_RATE_LIMIT_RETRIES} after {delay:.1f}s"
+            )
+            time.sleep(delay)
+
+        raise RuntimeError("Unreachable rate-limit retry state")
 
     def authenticate(self) -> bool:
         """

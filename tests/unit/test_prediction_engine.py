@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 from src.prediction.engine import EntryPredictionEngine, PredictionFeatureBuilder
 
@@ -12,8 +11,12 @@ def _features():
             "atr_14": 2.0,
             "ema_20": 98 + i,
             "ema_50": 95 + i,
+            "ema_200": 90 + i,
             "rsi_14": 60.0,
             "ema_50_slope_20": 0.2,
+            "plus_di": 25.0,
+            "minus_di": 15.0,
+            "atr_sma_20": 1.8,
         })
     return pd.DataFrame(rows)
 
@@ -42,3 +45,14 @@ def test_feature_builder_is_point_in_time_shaped():
     assert list(frame.columns) == PredictionFeatureBuilder.FEATURE_COLUMNS
     assert len(frame) == 1
     assert frame.isna().sum().sum() == 0
+
+
+def test_feature_builder_adds_regime_interactions():
+    frame = PredictionFeatureBuilder.build(_signal(), _features())
+    assert frame.loc[0, "trend_bullish"] == 1.0
+    assert frame.loc[0, "trend_bearish"] == 0.0
+    assert frame.loc[0, "momentum_positive"] == 1.0
+    assert frame.loc[0, "momentum_negative"] == 0.0
+    assert frame.loc[0, "return_5d_x_trend_bullish"] > 0.0
+    assert frame.loc[0, "atr_pct_x_trend_bullish"] > 0.0
+    assert frame.loc[0, "atr_expansion_x_trend_bullish"] > 0.0

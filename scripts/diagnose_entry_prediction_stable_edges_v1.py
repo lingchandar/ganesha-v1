@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from itertools import combinations
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -19,7 +19,6 @@ from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_s
 from scripts.diagnose_entry_prediction_oos_v1 import (
     DEFAULT_DATASET,
     DEFAULT_PREDICTIONS,
-    KEYS,
     _merge_oos,
     _momentum_regime,
     _trend_regime,
@@ -30,7 +29,7 @@ MIN_GROUP_ROWS = 200
 MIN_POSITIVE_RATE = 0.05
 MIN_POOLED_AUC = 0.55
 MIN_POOLED_TOP_10_LIFT = 1.20
-MIN_STABLE_FOLDS = 4
+MAX_REQUIRED_STABLE_FOLDS = 4
 
 REGIME_COLUMNS = (
     "trend_regime",
@@ -61,7 +60,7 @@ def _metrics(frame: pd.DataFrame) -> Dict[str, float]:
     }
 
 
-def _candidate_stability(frame: pd.DataFrame) -> Tuple[int, int, float, float]:
+def _candidate_stability(frame: pd.DataFrame, required_stable_folds: int) -> Tuple[int, int, float, float]:
     fold_auc_ok = 0
     fold_lift_ok = 0
     aucs: List[float] = []
@@ -93,6 +92,11 @@ def _group_name(columns: Sequence[str], values: Sequence[object]) -> str:
 
 
 def discover_candidates(frame: pd.DataFrame) -> pd.DataFrame:
+    available_folds = int(frame["fold"].nunique())
+    required_stable_folds = min(MAX_REQUIRED_STABLE_FOLDS, available_folds)
+    if required_stable_folds < 1:
+        return pd.DataFrame()
+
     rows: List[Dict[str, object]] = []
     for size in (1, 2, 3):
         for columns in combinations(BASE_GROUP_COLUMNS, size):
@@ -109,8 +113,8 @@ def discover_candidates(frame: pd.DataFrame) -> pd.DataFrame:
                     continue
                 if metrics["top_10_lift"] < MIN_POOLED_TOP_10_LIFT:
                     continue
-                fold_auc_ok, fold_lift_ok, mean_fold_auc, mean_fold_lift = _candidate_stability(part)
-                if fold_auc_ok < MIN_STABLE_FOLDS or fold_lift_ok < MIN_STABLE_FOLDS:
+                fold_auc_ok, fold_lift_ok, mean_fold_auc, mean_fold_lift = _candidate_stability(part, required_stable_folds)
+                if fold_auc_ok < required_stable_folds or fold_lift_ok < required_stable_folds:
                     continue
                 rows.append(
                     {
@@ -124,19 +128,19 @@ def discover_candidates(frame: pd.DataFrame) -> pd.DataFrame:
                         "pooled_top_10_lift": metrics["top_10_lift"],
                         "stable_auc_folds": fold_auc_ok,
                         "stable_lift_folds": fold_lift_ok,
+                        "required_stable_folds": required_stable_folds,
                         "mean_fold_auc": mean_fold_auc,
                         "mean_fold_top_10_lift": mean_fold_lift,
                     }
                 )
 
+    columns = [
+        "group", "dimensions", "rows", "positive_rate", "pooled_auc", "pooled_ap",
+        "pooled_brier", "pooled_top_10_lift", "stable_auc_folds", "stable_lift_folds",
+        "required_stable_folds", "mean_fold_auc", "mean_fold_top_10_lift",
+    ]
     if not rows:
-        return pd.DataFrame(
-            columns=[
-                "group", "dimensions", "rows", "positive_rate", "pooled_auc", "pooled_ap",
-                "pooled_brier", "pooled_top_10_lift", "stable_auc_folds", "stable_lift_folds",
-                "mean_fold_auc", "mean_fold_top_10_lift",
-            ]
-        )
+        return pd.DataFrame(columns=columns)
 
     report = pd.DataFrame(rows)
     return report.sort_values(
@@ -158,6 +162,7 @@ def main() -> None:
     merged["volatility_regime"] = _volatility_regime(merged)
 
     candidates = discover_candidates(merged)
+    required = min(MAX_REQUIRED_STABLE_FOLDS, int(merged["fold"].nunique()))
     print("ENTRY_PREDICTION_V1_STABLE_EDGE_DIAGNOSTIC")
     print(f"rows={len(merged)} folds={merged['fold'].nunique()}")
     print(f"oos_dates={merged['trade_date'].min().date()}..{merged['trade_date'].max().date()}")
@@ -167,7 +172,8 @@ def main() -> None:
         f"min_positive_rate:{MIN_POSITIVE_RATE:.2f} "
         f"min_auc:{MIN_POOLED_AUC:.2f} "
         f"min_top10_lift:{MIN_POOLED_TOP_10_LIFT:.2f} "
-        f"min_stable_folds:{MIN_STABLE_FOLDS}"
+        f"required_stable_folds:{required} "
+        f"max_required_stable_folds:{MAX_REQUIRED_STABLE_FOLDS}"
     )
     print(f"candidates={len(candidates)}")
     if candidates.empty:
@@ -177,7 +183,7 @@ def main() -> None:
 
     print("\nDECISION")
     print("Diagnostic only: no model promotion, threshold change, or EntryGate change.")
-    print("A subgroup is a V2 candidate only when pooled edge and fold-level stability both pass.")
+    print("Stable-fold requirement scales down only to the number of folds actually available in the development window; it never exceeds four.")
 
 
 if __name__ == "__main__":

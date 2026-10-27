@@ -24,6 +24,12 @@ VALIDATION_SESSIONS = 60
 MIN_TRAIN_SESSIONS = 180
 TOP_FRACTIONS = (0.01, 0.03, 0.05, 0.10)
 
+# A model must pass both fold-level and pooled OOS checks. Fold averages alone
+# can hide temporal ranking reversals, so promotion requires pooled AUC >= 0.60.
+PRODUCTION_OOS_MIN_AUC = 0.60
+PRODUCTION_OOS_MIN_TOP_5_LIFT = 1.30
+PRODUCTION_OOS_MIN_TOP_10_LIFT = 1.20
+
 
 @dataclass(frozen=True)
 class FoldMetrics:
@@ -147,8 +153,6 @@ def train(dataset_path: Path, model_path: Path) -> dict:
     mean_brier = float(np.mean([m.brier for m in metrics]))
     mean_lifts = {key: float(np.mean([m.top_lift[key] for m in metrics])) for key in metrics[0].top_lift}
 
-    production_ready = mean_auc >= 0.60 and mean_lifts["top_5pct"] >= 1.50 and mean_lifts["top_10pct"] >= 1.30
-
     final_model = _make_model(df)
     final_model.fit(df[features], df[LABEL_COLUMN])
     bundle = {
@@ -156,11 +160,14 @@ def train(dataset_path: Path, model_path: Path) -> dict:
         "label_policy": LABEL_POLICY,
         "feature_columns": features,
         "model": final_model,
-        "production_ready": production_ready,
-        "mean_auc": mean_auc,
+        "production_ready": False,
+        "fold_mean_auc": mean_auc,
         "mean_average_precision": mean_ap,
         "mean_brier": mean_brier,
         "mean_top_lift": mean_lifts,
+        "production_oos_min_auc": PRODUCTION_OOS_MIN_AUC,
+        "production_oos_min_top_5_lift": PRODUCTION_OOS_MIN_TOP_5_LIFT,
+        "production_oos_min_top_10_lift": PRODUCTION_OOS_MIN_TOP_10_LIFT,
         "purge_sessions": PURGE_SESSIONS,
         "calibration_sessions": CALIBRATION_SESSIONS,
         "calibration_gap": CALIBRATION_GAP,
@@ -177,6 +184,6 @@ def train(dataset_path: Path, model_path: Path) -> dict:
     print(f"rows={len(df)} folds={len(metrics)}")
     print(f"mean_auc={mean_auc:.4f} mean_ap={mean_ap:.4f} mean_brier={mean_brier:.4f}")
     print("mean_top_lift=" + " ".join(f"{k}={v:.2f}" for k, v in mean_lifts.items()))
-    print(f"production_ready={production_ready}")
+    print("production_ready=False (pooled OOS validation required)")
     print(f"saved_model={model_path}")
     return bundle

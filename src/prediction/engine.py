@@ -20,64 +20,6 @@ SETUP_TYPES = (
     "RS_LEADER_BREAKOUT",
 )
 
-REGIME_FEATURE_COLUMNS = [
-    "trend_bullish",
-    "trend_bearish",
-    "momentum_positive",
-    "momentum_negative",
-]
-
-REGIME_INTERACTION_FEATURE_COLUMNS = [
-    "return_5d_x_trend_bullish",
-    "return_5d_x_trend_bearish",
-    "rsi_14_x_momentum_positive",
-    "rsi_14_x_momentum_negative",
-    "atr_pct_x_trend_bullish",
-    "atr_pct_x_trend_bearish",
-    "atr_expansion_x_trend_bullish",
-    "atr_expansion_x_trend_bearish",
-]
-
-
-def add_regime_features(frame: pd.DataFrame) -> pd.DataFrame:
-    """Add point-in-time regime flags and interactions without future-data quantiles."""
-    result = frame.copy()
-    trend_bullish = (
-        (result["price_vs_ema200_pct"] > 0)
-        & (result["ema20_vs_ema50_pct"] > 0)
-        & (result["ema50_vs_ema200_pct"] > 0)
-    )
-    trend_bearish = (
-        (result["price_vs_ema200_pct"] < 0)
-        & (result["ema20_vs_ema50_pct"] < 0)
-        & (result["ema50_vs_ema200_pct"] < 0)
-    )
-    momentum_positive = (
-        (result["return_5d"] > 0)
-        & (result["plus_di_minus_di"] > 0)
-        & (result["rsi_14"] >= 55)
-    )
-    momentum_negative = (
-        (result["return_5d"] < 0)
-        & (result["plus_di_minus_di"] < 0)
-        & (result["rsi_14"] <= 45)
-    )
-
-    result["trend_bullish"] = trend_bullish.astype(float)
-    result["trend_bearish"] = trend_bearish.astype(float)
-    result["momentum_positive"] = momentum_positive.astype(float)
-    result["momentum_negative"] = momentum_negative.astype(float)
-    result["return_5d_x_trend_bullish"] = result["return_5d"] * result["trend_bullish"]
-    result["return_5d_x_trend_bearish"] = result["return_5d"] * result["trend_bearish"]
-    result["rsi_14_x_momentum_positive"] = result["rsi_14"] * result["momentum_positive"]
-    result["rsi_14_x_momentum_negative"] = result["rsi_14"] * result["momentum_negative"]
-    result["atr_pct_x_trend_bullish"] = result["atr_pct"] * result["trend_bullish"]
-    result["atr_pct_x_trend_bearish"] = result["atr_pct"] * result["trend_bearish"]
-    result["atr_expansion_x_trend_bullish"] = result["atr_expansion_ratio"] * result["trend_bullish"]
-    result["atr_expansion_x_trend_bearish"] = result["atr_expansion_ratio"] * result["trend_bearish"]
-    return result
-
-
 @dataclass(frozen=True)
 class PredictionResult:
     available: bool
@@ -87,16 +29,13 @@ class PredictionResult:
     model_version: Optional[str]
     reason: str
 
-
 def _signal_value(signal: Any, name: str, default: Any = None) -> Any:
     if isinstance(signal, dict):
         return signal.get(name, default)
     return getattr(signal, name, default)
 
-
 class PredictionFeatureBuilder:
     """Build features using only data known at the signal timestamp."""
-
     NUMERIC_FEATURE_COLUMNS = [
         "rsi_14", "rsi_change_5d", "atr_pct", "atr_expansion_ratio",
         "volume_surge_multiple", "risk_reward_ratio", "distance_to_stop_atr",
@@ -106,7 +45,7 @@ class PredictionFeatureBuilder:
         "adx_14", "plus_di_minus_di", "macd_hist_pct", "macd_hist_diff_pct",
     ]
     SETUP_FEATURE_COLUMNS = [f"setup_{setup.lower()}" for setup in SETUP_TYPES]
-    FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + SETUP_FEATURE_COLUMNS + REGIME_FEATURE_COLUMNS + REGIME_INTERACTION_FEATURE_COLUMNS
+    FEATURE_COLUMNS = NUMERIC_FEATURE_COLUMNS + SETUP_FEATURE_COLUMNS
 
     @classmethod
     def build(cls, signal: Any, df_features: pd.DataFrame) -> pd.DataFrame:
@@ -133,20 +72,16 @@ class PredictionFeatureBuilder:
         row = {
             "rsi_14": float(latest.get("rsi_14", 50.0)), "rsi_change_5d": rsi_change_5d,
             "atr_pct": atr / close, "atr_expansion_ratio": atr_expansion_ratio,
-            "volume_surge_multiple": float(_signal_value(signal, "volume_surge_multiple", 1.0)),
-            "risk_reward_ratio": reward / risk if risk > 0 else 0.0, "distance_to_stop_atr": risk / atr,
-            "distance_to_target_atr": reward / atr, "price_vs_ema20_pct": (close / ema20) - 1.0 if ema20 else 0.0,
-            "price_vs_ema50_pct": (close / ema50) - 1.0 if ema50 else 0.0, "price_vs_ema200_pct": (close / ema200) - 1.0 if ema200 else 0.0,
-            "ema20_vs_ema50_pct": (ema20 / ema50) - 1.0 if ema50 else 0.0, "ema50_vs_ema200_pct": (ema50 / ema200) - 1.0 if ema200 else 0.0,
-            "ema50_slope_20": float(latest.get("ema_50_slope_20", 0.0)), "return_5d": ret5, "return_20d": ret20,
-            "volatility_20d": vol20, "adx_14": adx, "plus_di_minus_di": plus_di - minus_di,
-            "macd_hist_pct": macd_hist / close, "macd_hist_diff_pct": macd_hist_diff / close,
+            "volume_surge_multiple": float(_signal_value(signal, "volume_surge_multiple", 1.0)), "risk_reward_ratio": reward / risk if risk > 0 else 0.0,
+            "distance_to_stop_atr": risk / atr, "distance_to_target_atr": reward / atr,
+            "price_vs_ema20_pct": (close / ema20) - 1.0 if ema20 else 0.0, "price_vs_ema50_pct": (close / ema50) - 1.0 if ema50 else 0.0,
+            "price_vs_ema200_pct": (close / ema200) - 1.0 if ema200 else 0.0, "ema20_vs_ema50_pct": (ema20 / ema50) - 1.0 if ema50 else 0.0,
+            "ema50_vs_ema200_pct": (ema50 / ema200) - 1.0 if ema200 else 0.0, "ema50_slope_20": float(latest.get("ema_50_slope_20", 0.0)),
+            "return_5d": ret5, "return_20d": ret20, "volatility_20d": vol20, "adx_14": adx,
+            "plus_di_minus_di": plus_di - minus_di, "macd_hist_pct": macd_hist / close, "macd_hist_diff_pct": macd_hist_diff / close,
         }
         row.update({column: float(column == f"setup_{setup_type.lower()}") for column in cls.SETUP_FEATURE_COLUMNS})
-        base = pd.DataFrame([row], columns=cls.NUMERIC_FEATURE_COLUMNS + cls.SETUP_FEATURE_COLUMNS)
-        base = add_regime_features(base)
-        return base[cls.FEATURE_COLUMNS]
-
+        return pd.DataFrame([row], columns=cls.FEATURE_COLUMNS)
 
 class EntryPredictionEngine:
     """Loads a trained, temporally validated model for entry decisions."""

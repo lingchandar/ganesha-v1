@@ -61,7 +61,7 @@ def evaluate(dataset_path: Path, predictions_path: Path | None = None) -> Dict[s
 
     oos_parts: List[pd.DataFrame] = []
     for fold_index, (train, valid) in enumerate(folds, start=1):
-        model = _make_model()
+        model = _make_model(train)
         model.fit(train[features], train["label_target_before_stop"])
         valid = valid.copy()
         valid["probability"] = model.predict_proba(valid[features])[:, 1]

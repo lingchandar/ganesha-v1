@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import joblib
-import numpy as np
 import pandas as pd
 
 MODEL_VERSION = "entry_v4"
@@ -26,8 +25,6 @@ REGIME_FEATURE_COLUMNS = [
     "trend_bearish",
     "momentum_positive",
     "momentum_negative",
-    "volatility_low",
-    "volatility_high",
 ]
 
 REGIME_INTERACTION_FEATURE_COLUMNS = [
@@ -37,11 +34,13 @@ REGIME_INTERACTION_FEATURE_COLUMNS = [
     "rsi_14_x_momentum_negative",
     "atr_pct_x_trend_bullish",
     "atr_pct_x_trend_bearish",
+    "atr_expansion_x_trend_bullish",
+    "atr_expansion_x_trend_bearish",
 ]
 
 
 def add_regime_features(frame: pd.DataFrame) -> pd.DataFrame:
-    """Add deterministic regime and interaction features from point-in-time inputs."""
+    """Add point-in-time regime flags and interactions without future-data quantiles."""
     result = frame.copy()
     trend_bullish = (
         (result["price_vs_ema200_pct"] > 0)
@@ -64,25 +63,18 @@ def add_regime_features(frame: pd.DataFrame) -> pd.DataFrame:
         & (result["rsi_14"] <= 45)
     )
 
-    # Volatility interactions are based on within-frame terciles. During training
-    # the full historical frame is used only to construct a deterministic feature;
-    # the production model does not use a separately trained volatility model.
-    low_cut, high_cut = result["atr_pct"].quantile([1 / 3, 2 / 3])
-    volatility_low = result["atr_pct"] <= low_cut
-    volatility_high = result["atr_pct"] > high_cut
-
     result["trend_bullish"] = trend_bullish.astype(float)
     result["trend_bearish"] = trend_bearish.astype(float)
     result["momentum_positive"] = momentum_positive.astype(float)
     result["momentum_negative"] = momentum_negative.astype(float)
-    result["volatility_low"] = volatility_low.astype(float)
-    result["volatility_high"] = volatility_high.astype(float)
     result["return_5d_x_trend_bullish"] = result["return_5d"] * result["trend_bullish"]
     result["return_5d_x_trend_bearish"] = result["return_5d"] * result["trend_bearish"]
     result["rsi_14_x_momentum_positive"] = result["rsi_14"] * result["momentum_positive"]
     result["rsi_14_x_momentum_negative"] = result["rsi_14"] * result["momentum_negative"]
     result["atr_pct_x_trend_bullish"] = result["atr_pct"] * result["trend_bullish"]
     result["atr_pct_x_trend_bearish"] = result["atr_pct"] * result["trend_bearish"]
+    result["atr_expansion_x_trend_bullish"] = result["atr_expansion_ratio"] * result["trend_bullish"]
+    result["atr_expansion_x_trend_bearish"] = result["atr_expansion_ratio"] * result["trend_bearish"]
     return result
 
 

@@ -11,13 +11,13 @@ import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
-from sklearn.model_selection import TimeSeriesSplit
 
 from src.prediction.engine import PredictionFeatureBuilder
 
 MODEL_VERSION = "entry_prediction_v1"
 LABEL_COLUMN = "label_target_before_stop"
 PURGE_SESSIONS = 15
+CALIBRATION_SESSIONS = 60
 CALIBRATION_GAP = PURGE_SESSIONS
 VALIDATION_SESSIONS = 60
 MIN_TRAIN_SESSIONS = 180
@@ -57,7 +57,30 @@ def _folds(df: pd.DataFrame) -> List[tuple[pd.DataFrame, pd.DataFrame]]:
     return folds
 
 
-def _make_model():
+def _calibration_split(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Return a session-aware train/calibration split with a purged gap."""
+    dates = np.array(sorted(_date_series(df).unique()))
+    if len(dates) <= CALIBRATION_SESSIONS + CALIBRATION_GAP:
+        raise ValueError(
+            "Need more sessions than calibration window plus purge gap: "
+            f"sessions={len(dates)} calibration={CALIBRATION_SESSIONS} gap={CALIBRATION_GAP}"
+        )
+
+    calibration_start = len(dates) - CALIBRATION_SESSIONS
+    train_end = calibration_start - CALIBRATION_GAP
+    train_dates = dates[:train_end]
+    calibration_dates = dates[calibration_start:]
+
+    normalized = _date_series(df)
+    train_idx = np.flatnonzero(normalized.isin(train_dates).to_numpy())
+    calibration_idx = np.flatnonzero(normalized.isin(calibration_dates).to_numpy())
+    if train_idx.size == 0 or calibration_idx.size == 0:
+        raise ValueError("Calibration split produced an empty train or calibration set")
+
+    return train_idx, calibration_idx
+
+
+def _make_model(df: pd.DataFrame):
     base = HistGradientBoostingClassifier(
         learning_rate=0.035,
         max_iter=300,
@@ -66,10 +89,12 @@ def _make_model():
         l2_regularization=3.0,
         random_state=42,
     )
+    train_idx, calibration_idx = _calibration_split(df)
     return CalibratedClassifierCV(
         base,
         method="sigmoid",
-        cv=TimeSeriesSplit(n_splits=3, gap=CALIBRATION_GAP),
+        cv=[(train_idx, calibration_idx)],
+        ensemble=True,
     )
 
 
@@ -86,7 +111,7 @@ def evaluate_dataset(df: pd.DataFrame) -> List[FoldMetrics]:
     folds = _folds(df)
     metrics: List[FoldMetrics] = []
     for train, valid in folds:
-        model = _make_model()
+        model = _make_model(train)
         model.fit(train[features], train[LABEL_COLUMN])
         probability = model.predict_proba(valid[features])[:, 1]
         lifts = {f"top_{int(f * 100)}pct": _top_lift(valid[LABEL_COLUMN], probability, f) for f in TOP_FRACTIONS}
@@ -120,10 +145,9 @@ def train(dataset_path: Path, model_path: Path) -> dict:
     mean_brier = float(np.mean([m.brier for m in metrics]))
     mean_lifts = {key: float(np.mean([m.top_lift[key] for m in metrics])) for key in metrics[0].top_lift}
 
-    # Production is gated by out-of-sample discrimination and ranking lift.
     production_ready = mean_auc >= 0.60 and mean_lifts["top_5pct"] >= 1.50 and mean_lifts["top_10pct"] >= 1.30
 
-    final_model = _make_model()
+    final_model = _make_model(df)
     final_model.fit(df[features], df[LABEL_COLUMN])
     bundle = {
         "model_version": MODEL_VERSION,
@@ -135,6 +159,7 @@ def train(dataset_path: Path, model_path: Path) -> dict:
         "mean_brier": mean_brier,
         "mean_top_lift": mean_lifts,
         "purge_sessions": PURGE_SESSIONS,
+        "calibration_sessions": CALIBRATION_SESSIONS,
         "calibration_gap": CALIBRATION_GAP,
         "validation_sessions": VALIDATION_SESSIONS,
         "min_train_sessions": MIN_TRAIN_SESSIONS,

@@ -25,7 +25,7 @@ DEFAULT_DATASET = Path("data/prediction/entry_prediction_dataset_v1.csv")
 LABEL = "label_target_before_stop"
 FEATURES = PredictionFeatureBuilder.NUMERIC_FEATURE_COLUMNS + PredictionFeatureBuilder.SETUP_FEATURE_COLUMNS
 MIN_HOLDOUT_SESSIONS = 60
-MAX_FOLDS = 4
+MAX_FOLDS = 5
 
 
 def _models() -> Dict[str, object]:
@@ -63,14 +63,12 @@ def _metrics(y: pd.Series, p: np.ndarray) -> Dict[str, float]:
 
 
 def _folds(dates: np.ndarray) -> list[Tuple[pd.Timestamp, pd.Timestamp]]:
-    usable = len(dates) - MIN_HOLDOUT_SESSIONS
-    starts = np.linspace(max(MIN_TRAIN_SESSIONS, 1), usable - MIN_HOLDOUT_SESSIONS, MAX_FOLDS, dtype=int)
-    out = []
-    for start_idx in sorted(set(starts.tolist())):
-        end_idx = min(start_idx + MIN_HOLDOUT_SESSIONS, len(dates))
-        if end_idx - start_idx >= MIN_HOLDOUT_SESSIONS:
-            out.append((pd.Timestamp(dates[start_idx]), pd.Timestamp(dates[end_idx - 1])))
-    return out
+    first_start = MIN_TRAIN_SESSIONS + PURGE_SESSIONS
+    last_start = len(dates) - MIN_HOLDOUT_SESSIONS
+    if last_start < first_start:
+        return []
+    starts = np.linspace(first_start, last_start, MAX_FOLDS, dtype=int)
+    return [(pd.Timestamp(dates[int(start)]), pd.Timestamp(dates[int(start + MIN_HOLDOUT_SESSIONS - 1)])) for start in sorted(set(starts.tolist()))]
 
 
 def evaluate(path: Path) -> pd.DataFrame:
@@ -107,6 +105,10 @@ def main() -> None:
     print("\nSUMMARY")
     print(summary.to_string(index=False))
     print("\nDECISION")
+    for _, row in summary.iterrows():
+        model_rows = raw[raw["model"] == row["model"]]
+        auc_stable = int((model_rows["auc"] >= 0.60).sum())
+        print(f"{row['model']}: auc>=0.60 in {auc_stable}/{len(model_rows)} folds")
     print("Diagnostic only. Promote an algorithm only after stable repeated temporal edge plus unchanged production gates.")
 
 

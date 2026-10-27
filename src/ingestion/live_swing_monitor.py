@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 from datetime import date
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from src.ingestion.live_analysis_engine import LiveAnalysisEngine
 from src.ingestion.live_candle_engine import LiveCandleEngine
 from src.ingestion.market_data_client import MarketDataClient
+from src.ingestion.one_minute_candle_builder import OneMinuteCandle
 
 
 class LiveSwingMonitor:
@@ -19,10 +21,21 @@ class LiveSwingMonitor:
             raise ValueError("At least one FYERS symbol is required")
 
         self.analysis = LiveAnalysisEngine(signal_handler=signal_handler)
-        self.candle_engine = LiveCandleEngine(candle_handler=self.analysis.on_candle)
+        self.candle_engine = LiveCandleEngine(candle_handler=self._handle_candle)
+
+    def _handle_candle(self, candle: OneMinuteCandle) -> None:
+        """Log completed one-minute candles before forwarding them to analysis."""
+        print(
+            f"LIVE 1M | {candle.symbol} | {candle.timestamp.isoformat()} | "
+            f"O={candle.open_price:.2f} H={candle.high_price:.2f} "
+            f"L={candle.low_price:.2f} C={candle.close_price:.2f} "
+            f"V={candle.volume_traded} TICKS={candle.tick_count}",
+            flush=True,
+        )
+        self.analysis.on_candle(candle)
 
     def warm_up(self, lookback_days: int = 7) -> dict[str, int]:
-        """Load recent completed 15-minute history for every subscribed symbol."""
+        """Load completed daily history for every subscribed symbol."""
         counts: dict[str, int] = {}
         with MarketDataClient() as client:
             if not client.authenticate():
@@ -38,7 +51,7 @@ class LiveSwingMonitor:
     ) -> dict[str, object]:
         """Evaluate open trades using one completed daily candle per symbol.
 
-        This is intentionally separate from the 15-minute entry stream because
+        This is intentionally separate from the daily entry stream because
         PrecisionExitEngine is a daily-bar exit engine. The supplied date must
         represent a completed trading session.
         """
@@ -90,3 +103,36 @@ class LiveSwingMonitor:
         self.start()
         self.candle_engine.run_forever()
         return counts
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser for the live read-only monitor."""
+    parser = argparse.ArgumentParser(description="Run Ganesha's read-only live swing monitor")
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        required=True,
+        help="FYERS symbols to monitor, e.g. NSE:TCS-EQ NSE:INFY-EQ",
+    )
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Run the live monitor from the command line."""
+    args = build_parser().parse_args(argv)
+    monitor = LiveSwingMonitor(args.symbols)
+
+    print(f"=== GANESHA V1 LIVE MONITOR | {', '.join(monitor.symbols)} ===", flush=True)
+    try:
+        counts = monitor.run()
+        print(f"WARM-UP COMPLETE: {counts}", flush=True)
+    except KeyboardInterrupt:
+        print("\n=== LIVE MONITOR STOPPED ===", flush=True)
+    finally:
+        monitor.candle_engine.stop()
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

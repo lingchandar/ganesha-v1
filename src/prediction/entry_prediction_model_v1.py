@@ -18,6 +18,7 @@ from src.prediction.engine import PredictionFeatureBuilder
 MODEL_VERSION = "entry_prediction_v1"
 LABEL_COLUMN = "label_target_before_stop"
 PURGE_SESSIONS = 15
+CALIBRATION_GAP = PURGE_SESSIONS
 VALIDATION_SESSIONS = 60
 MIN_TRAIN_SESSIONS = 180
 TOP_FRACTIONS = (0.01, 0.03, 0.05, 0.10)
@@ -68,7 +69,7 @@ def _make_model():
     return CalibratedClassifierCV(
         base,
         method="sigmoid",
-        cv=TimeSeriesSplit(n_splits=3),
+        cv=TimeSeriesSplit(n_splits=3, gap=CALIBRATION_GAP),
     )
 
 
@@ -134,6 +135,7 @@ def train(dataset_path: Path, model_path: Path) -> dict:
         "mean_brier": mean_brier,
         "mean_top_lift": mean_lifts,
         "purge_sessions": PURGE_SESSIONS,
+        "calibration_gap": CALIBRATION_GAP,
         "validation_sessions": VALIDATION_SESSIONS,
         "min_train_sessions": MIN_TRAIN_SESSIONS,
         "train_start": str(df["trade_date"].min().date()),

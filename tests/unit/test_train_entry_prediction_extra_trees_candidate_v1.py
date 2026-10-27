@@ -9,7 +9,7 @@ def test_candidate_trainer_writes_candidate_bundle(tmp_path: Path):
     dataset = tmp_path / "dataset.csv"
     output = tmp_path / "candidate.joblib"
     rows = []
-    for day in range(240):
+    for day in range(330):
         date = pd.Timestamp("2024-01-01") + pd.Timedelta(days=day)
         for ticker in ("AAA", "BBB"):
             rows.append({

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
-from src.prediction.entry_prediction_model_v1 import _folds, _make_model
+from src.prediction.entry_prediction_model_v1 import LABEL_POLICY, _folds, _make_model
 from src.prediction.engine import PredictionFeatureBuilder
 
 DEFAULT_DATASET = Path("data/prediction/entry_prediction_dataset_v1.csv")
@@ -50,12 +50,13 @@ def _mean_or_zero(values: Iterable[float]) -> float:
 def evaluate(dataset_path: Path, predictions_path: Path | None = None) -> Dict[str, object]:
     df = pd.read_csv(dataset_path, parse_dates=["trade_date"])
     features = PredictionFeatureBuilder.FEATURE_COLUMNS
-    required = features + ["ticker_symbol", "trade_date", "label_target_before_stop", "outcome_valid"]
+    required = features + ["ticker_symbol", "trade_date", "label_target_before_stop"]
     missing = [column for column in required if column not in df.columns]
     if missing:
         raise ValueError(f"Dataset missing columns: {missing}")
 
-    df = df[df["outcome_valid"] == 1].copy()
+    # Use the same complete-horizon label population as training. Unresolved
+    # examples are valid negatives under LABEL_POLICY, not rows to discard.
     df = df.sort_values(["trade_date", "ticker_symbol", "setup_type"]).reset_index(drop=True)
     folds = _folds(df)
 
@@ -90,6 +91,7 @@ def evaluate(dataset_path: Path, predictions_path: Path | None = None) -> Dict[s
 
     return {
         "model_version": "entry_prediction_v1",
+        "label_policy": LABEL_POLICY,
         "rows": int(len(oos)),
         "folds": int(len(folds)),
         "oos_start": str(oos["trade_date"].min().date()),
@@ -110,6 +112,7 @@ def main() -> None:
 
     report = evaluate(args.dataset, args.predictions_out)
     print(f"model_version={report['model_version']}")
+    print(f"label_policy={report['label_policy']}")
     print(f"rows={report['rows']} folds={report['folds']} oos_start={report['oos_start']} oos_end={report['oos_end']}")
     print(f"oos_auc={report['auc']:.4f} oos_ap={report['average_precision']:.4f} oos_brier={report['brier']:.4f} base_positive_rate={report['base_positive_rate']:.4f}")
     for key, metrics in report["top_k"].items():

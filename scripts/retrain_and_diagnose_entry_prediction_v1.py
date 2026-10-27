@@ -17,9 +17,16 @@ def main() -> None:
 
     print("\n=== EXPORT OOS PREDICTIONS ===")
     report = evaluate(DATASET, PREDICTIONS)
+    print(f"oos_label_policy={report['label_policy']}")
+    print(f"oos_rows={report['rows']}")
     print(f"oos_auc={report['auc']:.4f}")
     print(f"oos_ap={report['average_precision']:.4f}")
     print(f"oos_brier={report['brier']:.4f}")
+    for key, metrics in report["top_k"].items():
+        print(
+            f"{key}=positive_rate={metrics['daily_mean_positive_rate']:.4f} "
+            f"lift={metrics['daily_mean_lift']:.2f}x days={int(metrics['days_evaluated'])}"
+        )
     print(f"production_ready={bundle['production_ready']}")
     print(f"predictions_out={PREDICTIONS}")
 

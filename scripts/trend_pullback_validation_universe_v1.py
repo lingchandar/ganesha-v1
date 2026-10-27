@@ -1,0 +1,61 @@
+"""Curated liquid NSE validation universe for Trend Pullback research.
+
+Research-only universe. It is intentionally explicit and versioned so historical
+model validation is reproducible instead of depending on a changing NSE index.
+"""
+
+TREND_PULLBACK_VALIDATION_SYMBOLS = [
+    "NSE:RELIANCE-EQ",
+    "NSE:HDFCBANK-EQ",
+    "NSE:ICICIBANK-EQ",
+    "NSE:SBIN-EQ",
+    "NSE:AXISBANK-EQ",
+    "NSE:KOTAKBANK-EQ",
+    "NSE:INDUSINDBK-EQ",
+    "NSE:BAJFINANCE-EQ",
+    "NSE:BAJAJFINSV-EQ",
+    "NSE:SHRIRAMFIN-EQ",
+    "NSE:LT-EQ",
+    "NSE:BHARTIARTL-EQ",
+    "NSE:TCS-EQ",
+    "NSE:INFY-EQ",
+    "NSE:HCLTECH-EQ",
+    "NSE:WIPRO-EQ",
+    "NSE:TECHM-EQ",
+    "NSE:LTIM-EQ",
+    "NSE:ITC-EQ",
+    "NSE:HINDUNILVR-EQ",
+    "NSE:NESTLEIND-EQ",
+    "NSE:TATACONSUM-EQ",
+    "NSE:MARICO-EQ",
+    "NSE:BRITANNIA-EQ",
+    "NSE:ASIANPAINT-EQ",
+    "NSE:TITAN-EQ",
+    "NSE:M&M-EQ",
+    "NSE:MARUTI-EQ",
+    "NSE:TATAMOTORS-EQ",
+    "NSE:HEROMOTOCO-EQ",
+    "NSE:EICHERMOT-EQ",
+    "NSE:BAJAJ-AUTO-EQ",
+    "NSE:SUNPHARMA-EQ",
+    "NSE:DRREDDY-EQ",
+    "NSE:CIPLA-EQ",
+    "NSE:DIVISLAB-EQ",
+    "NSE:APOLLOHOSP-EQ",
+    "NSE:ADANIENT-EQ",
+    "NSE:ADANIPORTS-EQ",
+    "NSE:COALINDIA-EQ",
+    "NSE:NTPC-EQ",
+    "NSE:POWERGRID-EQ",
+    "NSE:ONGC-EQ",
+    "NSE:BPCL-EQ",
+    "NSE:IOC-EQ",
+    "NSE:TATASTEEL-EQ",
+    "NSE:JSWSTEEL-EQ",
+    "NSE:HINDALCO-EQ",
+    "NSE:ULTRACEMCO-EQ",
+    "NSE:GRASIM-EQ",
+]
+
+assert len(TREND_PULLBACK_VALIDATION_SYMBOLS) == 50
+assert len(set(TREND_PULLBACK_VALIDATION_SYMBOLS)) == 50

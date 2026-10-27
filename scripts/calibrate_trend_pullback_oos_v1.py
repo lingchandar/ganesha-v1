@@ -21,7 +21,6 @@ DEFAULT_LEDGER = Path("data/prediction/historical_population_trend_pullback_shad
 
 def ece(y: np.ndarray, p: np.ndarray, bins: int = 10) -> float:
     edges = np.linspace(0.0, 1.0, bins + 1)
-    total = len(y)
     value = 0.0
     for lo, hi in zip(edges[:-1], edges[1:]):
         mask = (p >= lo) & ((p < hi) if hi < 1 else (p <= hi))
@@ -31,7 +30,7 @@ def ece(y: np.ndarray, p: np.ndarray, bins: int = 10) -> float:
     return float(value)
 
 
-def metrics(frame: pd.DataFrame, prob_col: str) -> dict:
+def metrics(frame: pd.DataFrame, prob_col: str, bins: int) -> dict:
     y = frame["actual_success"].to_numpy(dtype=int)
     p = frame[prob_col].clip(1e-6, 1 - 1e-6).to_numpy(dtype=float)
     result = {
@@ -40,7 +39,7 @@ def metrics(frame: pd.DataFrame, prob_col: str) -> dict:
         "mean_probability": float(p.mean()),
         "brier": float(brier_score_loss(y, p)),
         "log_loss": float(log_loss(y, p, labels=[0, 1])),
-        "ece": ece(y, p),
+        "ece": ece(y, p, bins=bins),
     }
     if len(np.unique(y)) == 2:
         result["auc"] = float(roc_auc_score(y, p))
@@ -78,17 +77,27 @@ def main() -> None:
     args = ap.parse_args()
 
     frame = pd.read_csv(args.ledger)
-    required = {"date", "probability_target_before_stop", "actual_success"}
+
+    # The historical population evaluator writes trade_date + label_target_before_stop.
+    # Accept the older date/actual_success names too so this diagnostic works with
+    # either ledger schema without changing the underlying target definition.
+    date_col = "date" if "date" in frame.columns else "trade_date"
+    target_col = "actual_success" if "actual_success" in frame.columns else "label_target_before_stop"
+    required = {date_col, "probability_target_before_stop", target_col}
     missing = required - set(frame.columns)
     if missing:
         raise RuntimeError(f"Missing required columns: {sorted(missing)}")
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+
+    frame["date"] = pd.to_datetime(frame[date_col], errors="coerce")
     frame["probability_target_before_stop"] = pd.to_numeric(frame["probability_target_before_stop"], errors="coerce")
-    frame["actual_success"] = pd.to_numeric(frame["actual_success"], errors="coerce")
+    frame["actual_success"] = pd.to_numeric(frame[target_col], errors="coerce")
     frame = frame.dropna(subset=["date", "probability_target_before_stop", "actual_success"]).copy()
     frame["actual_success"] = frame["actual_success"].astype(int)
+    frame = frame[frame["actual_success"].isin([0, 1])].copy()
     frame = frame.sort_values("date").reset_index(drop=True)
 
+    if len(frame) < 30:
+        raise RuntimeError(f"Not enough rows for calibration experiment: {len(frame)}")
     if not 0.1 <= args.holdout_fraction <= 0.5:
         raise ValueError("--holdout-fraction must be between 0.1 and 0.5")
     split = int(len(frame) * (1.0 - args.holdout_fraction))
@@ -101,12 +110,13 @@ def main() -> None:
     calibrator = fit_platt(train, prob_col)
     holdout["calibrated_probability"] = apply_platt(calibrator, holdout, prob_col)
 
-    raw = metrics(holdout, prob_col)
-    calibrated = metrics(holdout, "calibrated_probability")
+    raw = metrics(holdout, prob_col, args.bins)
+    calibrated = metrics(holdout, "calibrated_probability", args.bins)
     result = {
         "experiment": "trend_pullback_probability_calibration_oos_v1",
         "decision": "diagnostic_only",
         "ledger": str(args.ledger),
+        "source_schema": {"date_column": date_col, "target_column": target_col},
         "rows": int(len(frame)),
         "date_range": [frame["date"].min().date().isoformat(), frame["date"].max().date().isoformat()],
         "chronological_split": {
@@ -136,6 +146,7 @@ def main() -> None:
     args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     print("=== TREND PULLBACK CALIBRATION OOS V1 ===")
+    print(f"SOURCE SCHEMA: date={date_col} target={target_col}")
     print(f"ROWS: {len(frame)} | TRAIN: {len(train)} | HOLDOUT: {len(holdout)}")
     print(f"DATE SPLIT: {train['date'].max().date()} -> {holdout['date'].min().date()}")
     print(f"PLATT: intercept={calibrator.intercept_[0]:.6f} slope={calibrator.coef_[0][0]:.6f}")

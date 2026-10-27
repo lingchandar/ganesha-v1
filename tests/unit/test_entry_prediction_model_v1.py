@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from src.prediction.entry_prediction_model_v1 import CALIBRATION_GAP, CALIBRATION_SESSIONS, _calibration_split, _folds, _top_lift
+from src.prediction.entry_prediction_model_v1 import CALIBRATION_GAP, CALIBRATION_SESSIONS, LABEL_POLICY, _calibration_split, _folds, _top_lift
 
 
 def test_top_lift_rewards_ranked_positive_examples():
@@ -40,3 +40,7 @@ def test_calibration_split_is_session_aware_and_purged():
     assert CALIBRATION_GAP == 15
     assert len(calibration_dates.dt.normalize().unique()) == CALIBRATION_SESSIONS
     assert (calibration_dates.min() - train_dates.max()).days >= CALIBRATION_GAP + 1
+
+
+def test_label_policy_is_explicitly_complete_horizon():
+    assert LABEL_POLICY == "target_before_stop_within_15_sessions_unresolved_as_loss"

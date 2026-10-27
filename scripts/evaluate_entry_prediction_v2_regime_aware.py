@@ -27,7 +27,7 @@ from scripts.diagnose_entry_prediction_oos_v1 import (
     _volatility_regime,
 )
 from scripts.diagnose_entry_prediction_stable_edges_v1 import discover_candidates
-from src.prediction.entry_prediction_model_v1 import _make_model
+from src.prediction.entry_prediction_model_v1 import MIN_TRAIN_SESSIONS, _make_model
 from src.prediction.engine import PredictionFeatureBuilder
 
 FEATURES = PredictionFeatureBuilder.FEATURE_COLUMNS
@@ -94,7 +94,12 @@ def evaluate(dataset_path: Path, predictions_path: Path) -> pd.DataFrame:
         holdout_mask = _matches(holdout, conditions)
         train = dataset[train_mask].copy()
         test = holdout[holdout_mask].copy()
-        if len(train) < MIN_SPECIALIZED_TRAIN_ROWS or len(test) < MIN_HOLDOUT_ROWS:
+        train_dates = pd.to_datetime(train["trade_date"]).dt.normalize().nunique()
+        if (
+            len(train) < MIN_SPECIALIZED_TRAIN_ROWS
+            or train_dates < MIN_TRAIN_SESSIONS
+            or len(test) < MIN_HOLDOUT_ROWS
+        ):
             continue
         if train[LABEL].nunique() < 2 or test[LABEL].nunique() < 2:
             continue
@@ -109,6 +114,7 @@ def evaluate(dataset_path: Path, predictions_path: Path) -> pd.DataFrame:
                 "development_rows": int(len(development[_matches(development, conditions)])),
                 "holdout_rows": int(len(test)),
                 "specialized_train_rows": int(len(train)),
+                "specialized_train_sessions": int(train_dates),
                 "holdout_positive_rate": metrics["positive_rate"],
                 "holdout_auc": metrics["auc"],
                 "holdout_ap": metrics["ap"],

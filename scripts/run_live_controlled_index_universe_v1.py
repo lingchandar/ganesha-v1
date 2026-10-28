@@ -1,8 +1,8 @@
-"""Run the read-only live monitor on the current NIFTY50 + BANKNIFTY universe.
+"""Run the read-only live monitor on the versioned 50-stock Trend Pullback universe.
 
-The universe is fetched from the project's official NSE Indices loader at runtime,
-so it follows the current controlled index membership instead of hard-coding a
-59-stock assumption. No orders are placed by this runner.
+This is the live counterpart of the historical population validator. It uses
+exactly the same fixed symbols as the reproducible Trend Pullback research
+universe, so historical and live tests are population-aligned.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from src.ingestion.live_swing_monitor import LiveSwingMonitor
-from src.ingestion.nse_index_universe import load_controlled_index_universe
+from scripts.trend_pullback_validation_universe_v1 import TREND_PULLBACK_VALIDATION_SYMBOLS
 
 DEFAULT_SHADOW_MODEL = Path("models/entry_prediction_extra_trees_candidate_v1.joblib")
 
@@ -21,9 +21,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--shadow-model", type=Path, default=DEFAULT_SHADOW_MODEL)
     args = parser.parse_args(argv)
 
-    symbols = load_controlled_index_universe()
-    print(f"=== GANESHA V1 CONTROLLED LIVE UNIVERSE ===")
-    print("SOURCE: current NIFTY50 + BANKNIFTY constituents")
+    symbols = tuple(TREND_PULLBACK_VALIDATION_SYMBOLS)
+    print("=== GANESHA V1 TREND PULLBACK LIVE UNIVERSE ===")
+    print("SOURCE: versioned TREND_PULLBACK_VALIDATION_SYMBOLS")
     print(f"UNIQUE SYMBOLS: {len(symbols)}")
     print("SYMBOLS:")
     print(" ".join(symbols))
@@ -35,7 +35,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         counts = monitor.run()
         print(f"WARM-UP COMPLETE: {counts}", flush=True)
     except KeyboardInterrupt:
-        print("\n=== CONTROLLED LIVE MONITOR STOPPED ===", flush=True)
+        print("\n=== TREND PULLBACK LIVE MONITOR STOPPED ===", flush=True)
     finally:
         monitor.candle_engine.stop()
 

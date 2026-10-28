@@ -1,17 +1,13 @@
-"""Validate the candidate model on the historical signal population used for training.
-
-The live shadow replay currently observes only TREND_PULLBACK because the live
-engine locks production setup selection to that setup. This harness can evaluate
-all six training setup detectors or one selected setup so model quality can be
-measured against the actual live population.
+"""Validate the candidate model on a historical signal population.
 
 Diagnostic only. It does not change EntryGate, production thresholds, or live
-order behaviour.
+order behaviour. When --symbols is omitted, the versioned 50-stock Trend
+Pullback validation universe is used.
 """
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from zoneinfo import ZoneInfo
@@ -25,6 +21,7 @@ from src.indicators.technical_indicators import TechnicalAnalysisEngine
 from src.ingestion.market_data_client import MarketDataClient
 from src.prediction.dataset import _candidate_signals
 from src.prediction.engine import PredictionFeatureBuilder
+from scripts.trend_pullback_validation_universe_v1 import TREND_PULLBACK_VALIDATION_SYMBOLS
 
 IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_MODEL = Path("models/entry_prediction_extra_trees_candidate_v1.joblib")
@@ -75,8 +72,6 @@ def _label(features: pd.DataFrame, entry_idx: int, signal: Any) -> Optional[dict
         low = float(row["low_price"])
         mfe_r = max(mfe_r, (high - entry) / risk)
         mae_r = min(mae_r, (low - entry) / risk)
-
-        # Match entry_prediction_dataset_v1: adverse barrier first on same bar.
         if not stop_hit and low <= stop:
             stop_hit = True
             days_to_stop = offset
@@ -130,7 +125,6 @@ def evaluate_symbol(symbol: str, sessions: int, bundle: dict, setup_type: Option
     raw = raw.reset_index(drop=True)
     features = TechnicalAnalysisEngine.compute_all_features(raw.copy())
     features["timestamp"] = raw["timestamp"].values
-
     replay_start = len(features) - sessions - HORIZON_SESSIONS
     replay_end = len(features) - HORIZON_SESSIONS
     start_idx = max(WARMUP_SESSIONS, replay_start)
@@ -152,19 +146,17 @@ def evaluate_symbol(symbol: str, sessions: int, bundle: dict, setup_type: Option
             timestamp = pd.Timestamp(features.iloc[i]["timestamp"])
             if timestamp.tzinfo is None:
                 timestamp = timestamp.tz_localize(IST)
-            rows.append(
-                {
-                    "ticker_symbol": symbol,
-                    "trade_date": timestamp.tz_convert(IST).date(),
-                    "setup_type": str(_value(signal, "setup_type", "")),
-                    "entry_price": float(_value(signal, "entry_price", np.nan)),
-                    "stop_loss": float(_value(signal, "stop_loss", np.nan)),
-                    "target_price": float(_value(signal, "target_price", np.nan)),
-                    "probability_target_before_stop": probability,
-                    "confidence": abs(probability - 0.5) * 2.0,
-                    **outcome,
-                }
-            )
+            rows.append({
+                "ticker_symbol": symbol,
+                "trade_date": timestamp.tz_convert(IST).date(),
+                "setup_type": str(_value(signal, "setup_type", "")),
+                "entry_price": float(_value(signal, "entry_price", np.nan)),
+                "stop_loss": float(_value(signal, "stop_loss", np.nan)),
+                "target_price": float(_value(signal, "target_price", np.nan)),
+                "probability_target_before_stop": probability,
+                "confidence": abs(probability - 0.5) * 2.0,
+                **outcome,
+            })
 
     label = setup_type or "ALL_SETUPS"
     print(f"POPULATION REPLAY | {symbol} | setup={label} | candidates={len(rows)} | replay_sessions={sessions}")
@@ -186,7 +178,6 @@ def summarize(frame: pd.DataFrame, setup_type: Optional[str]) -> None:
     if frame.empty:
         print("DECISION: zero evaluable historical candidates; investigate setup population before model work.")
         return
-
     y = frame["label_target_before_stop"].astype(int)
     p = frame["probability_target_before_stop"].astype(float)
     label = setup_type or "ALL_SETUPS"
@@ -207,48 +198,38 @@ def summarize(frame: pd.DataFrame, setup_type: Optional[str]) -> None:
         lift = _lift(frame, pct)
         label_pct = f"top_{int(pct * 100)}pct_lift"
         print(f"{label_pct}={lift:.6f}" if lift is not None else f"{label_pct}=NA")
-
     print("\nSETUP BREAKDOWN")
-    print(
-        frame.groupby("setup_type")
-        .agg(
-            predictions=("label_target_before_stop", "size"),
-            actual_rate=("label_target_before_stop", "mean"),
-            mean_probability=("probability_target_before_stop", "mean"),
-        )
-        .sort_values("predictions", ascending=False)
-        .to_string()
-    )
+    print(frame.groupby("setup_type").agg(
+        predictions=("label_target_before_stop", "size"),
+        actual_rate=("label_target_before_stop", "mean"),
+        mean_probability=("probability_target_before_stop", "mean"),
+    ).sort_values("predictions", ascending=False).to_string())
     print("\nDECISION: diagnostic only; candidate remains production_ready=False and candidate_only.")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--symbols", nargs="+", required=True)
+    parser.add_argument("--symbols", nargs="+", default=list(TREND_PULLBACK_VALIDATION_SYMBOLS))
     parser.add_argument("--sessions", type=int, default=REPLAY_SESSIONS)
     parser.add_argument("--setup-type", choices=SETUP_CHOICES, default=None)
     parser.add_argument("--model", type=Path, default=DEFAULT_MODEL)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
-
     if args.sessions < 1:
         raise ValueError("--sessions must be >= 1")
-
     bundle = _load_model(args.model)
     label = args.setup_type or "ALL_SETUPS"
     print(f"=== GANESHA V1 HISTORICAL POPULATION | MODEL AVAILABLE: True | SETUP: {label} ===")
-
+    print(f"UNIVERSE SYMBOLS: {len(args.symbols)}")
     rows: list[dict] = []
     for symbol in args.symbols:
         rows.extend(evaluate_symbol(symbol, args.sessions, bundle, args.setup_type))
-
     frame = pd.DataFrame(rows)
     if not frame.empty:
         frame = frame.sort_values(["trade_date", "ticker_symbol", "setup_type"]).reset_index(drop=True)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         frame.to_csv(args.output, index=False)
         print(f"HISTORICAL POPULATION LEDGER: {args.output} | rows={len(frame)}")
-
     summarize(frame, args.setup_type)
     return 0
 

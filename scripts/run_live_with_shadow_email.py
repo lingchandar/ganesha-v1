@@ -15,6 +15,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Sequence
 
+from scripts.trend_pullback_validation_universe_v1 import TREND_PULLBACK_VALIDATION_SYMBOLS
 
 PREFIX = "SHADOW ENTRY PREDICTION | "
 
@@ -93,7 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run Ganesha live monitor with shadow-prediction email alerts"
     )
-    parser.add_argument("--symbols", nargs="+", required=True)
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=list(TREND_PULLBACK_VALIDATION_SYMBOLS),
+        help="Symbols to monitor; defaults to the fixed 50-stock validation universe.",
+    )
     parser.add_argument(
         "--shadow-model",
         type=Path,
@@ -119,6 +125,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     else:
         print("SHADOW EMAIL ALERTS: DISABLED", flush=True)
+
+    print(f"LIVE SYMBOL UNIVERSE: {len(args.symbols)} symbols", flush=True)
 
     command = [
         sys.executable,

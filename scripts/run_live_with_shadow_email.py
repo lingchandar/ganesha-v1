@@ -110,12 +110,30 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("config/.env"),
     )
+    parser.add_argument(
+        "--test-email",
+        action="store_true",
+        help="Send one SMTP test email and exit without starting the live monitor.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     env = load_dotenv(args.env_file)
+
+    if args.test_email:
+        if not email_enabled(env):
+            print("SHADOW EMAIL TEST ERROR | SHADOW_EMAIL_ENABLED is false", flush=True)
+            return 1
+        test_line = "SHADOW EMAIL TEST | Ganesha V1 SMTP configuration is working"
+        try:
+            send_email(env, test_line)
+            print("SHADOW EMAIL TEST SENT", flush=True)
+            return 0
+        except Exception as exc:
+            print(f"SHADOW EMAIL TEST ERROR | {exc}", flush=True)
+            return 1
 
     if email_enabled(env):
         print(

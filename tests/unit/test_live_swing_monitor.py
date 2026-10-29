@@ -1,4 +1,6 @@
-from src.ingestion.live_swing_monitor import LiveSwingMonitor
+from pathlib import Path
+
+from src.ingestion.live_swing_monitor import LiveSwingMonitor, build_parser
 
 
 def test_monitor_requires_symbols():
@@ -13,6 +15,18 @@ def test_monitor_requires_symbols():
 def test_monitor_deduplicates_symbols():
     monitor = LiveSwingMonitor(["NSE:TCS-EQ", "NSE:TCS-EQ"])
     assert monitor.symbols == ("NSE:TCS-EQ",)
+    assert monitor.shadow_predictor.available is False
+
+
+def test_monitor_accepts_shadow_model_path():
+    monitor = LiveSwingMonitor(["NSE:TCS-EQ"], shadow_model_path=Path("/tmp/not-present.joblib"))
+    assert monitor.shadow_predictor.available is False
+
+
+def test_parser_exposes_shadow_model_option():
+    args = build_parser().parse_args(["--symbols", "NSE:TCS-EQ", "--shadow-model", "/tmp/candidate.joblib"])
+    assert args.symbols == ["NSE:TCS-EQ"]
+    assert str(args.shadow_model) == "/tmp/candidate.joblib"
 
 
 def test_monitor_daily_exit_evaluation_uses_completed_daily_candle():

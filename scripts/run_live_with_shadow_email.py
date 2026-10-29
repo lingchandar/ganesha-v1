@@ -1,0 +1,208 @@
+"""Run the live monitor and email every shadow prediction line.
+
+This is intentionally a terminal-output alert bridge. It does not change
+candidate-model logic, EntryGate behavior, or place orders.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import smtplib
+import subprocess
+import sys
+from datetime import datetime, time
+from email.message import EmailMessage
+from pathlib import Path
+from typing import Sequence
+from zoneinfo import ZoneInfo
+
+from scripts.trend_pullback_validation_universe_v1 import TREND_PULLBACK_VALIDATION_SYMBOLS
+
+PREFIX = "SHADOW ENTRY PREDICTION | "
+IST = ZoneInfo("Asia/Kolkata")
+NSE_REGULAR_CLOSE = time(15, 30)
+LIVE_STOP_GRACE_MINUTES = 5
+
+
+def load_dotenv(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def setting(env: dict[str, str], key: str, default: str = "") -> str:
+    return os.getenv(key, env.get(key, default))
+
+
+def email_enabled(env: dict[str, str]) -> bool:
+    return setting(env, "SHADOW_EMAIL_ENABLED", "false").lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def send_email(env: dict[str, str], shadow_line: str) -> None:
+    host = setting(env, "SHADOW_SMTP_HOST")
+    port = int(setting(env, "SHADOW_SMTP_PORT", "587"))
+    username = setting(env, "SHADOW_SMTP_USERNAME")
+    password = setting(env, "SHADOW_SMTP_PASSWORD")
+    sender = setting(env, "SHADOW_EMAIL_FROM", username)
+    recipient = setting(env, "SHADOW_EMAIL_TO")
+    use_tls = setting(env, "SHADOW_SMTP_USE_TLS", "true").lower() in {
+        "1", "true", "yes", "on"
+    }
+
+    missing = [
+        name for name, value in {
+            "SHADOW_SMTP_HOST": host,
+            "SHADOW_SMTP_USERNAME": username,
+            "SHADOW_SMTP_PASSWORD": password,
+            "SHADOW_EMAIL_FROM": sender,
+            "SHADOW_EMAIL_TO": recipient,
+        }.items() if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            "Shadow email is enabled but missing: " + ", ".join(missing)
+        )
+
+    message = EmailMessage()
+    message["From"] = sender
+    message["To"] = recipient
+    message["Subject"] = shadow_line.replace(
+        PREFIX, "GANESHA V1 SHADOW ENTRY | ", 1
+    )
+    message.set_content(
+        f"{shadow_line}\n\n"
+        "STATUS: CANDIDATE-ONLY SHADOW PREDICTION\n"
+        "This email is an alert that the terminal prediction appeared. "
+        "It is NOT a confirmed entry and does NOT place an order.\n"
+    )
+
+    with smtplib.SMTP(host, port, timeout=20) as smtp:
+        smtp.ehlo()
+        if use_tls:
+            smtp.starttls()
+            smtp.ehlo()
+        smtp.login(username, password)
+        smtp.send_message(message)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run Ganesha live monitor with shadow-prediction email alerts"
+    )
+    parser.add_argument(
+        "--symbols",
+        nargs="+",
+        default=list(TREND_PULLBACK_VALIDATION_SYMBOLS),
+        help="Symbols to monitor; defaults to the fixed 50-stock validation universe.",
+    )
+    parser.add_argument(
+        "--shadow-model",
+        type=Path,
+        default=Path("models/entry_prediction_extra_trees_candidate_v1.joblib"),
+    )
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=Path("config/.env"),
+    )
+    parser.add_argument(
+        "--test-email",
+        action="store_true",
+        help="Send one SMTP test email and exit without starting the live monitor.",
+    )
+    return parser
+
+
+def _after_market_close() -> bool:
+    """Return True only after a short post-close grace period for finalization."""
+    now = datetime.now(IST)
+    stop_at_minutes = NSE_REGULAR_CLOSE.hour * 60 + NSE_REGULAR_CLOSE.minute + LIVE_STOP_GRACE_MINUTES
+    return now.hour * 60 + now.minute >= stop_at_minutes
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    env = load_dotenv(args.env_file)
+
+    if args.test_email:
+        if not email_enabled(env):
+            print("SHADOW EMAIL TEST ERROR | SHADOW_EMAIL_ENABLED is false", flush=True)
+            return 1
+        test_line = "SHADOW EMAIL TEST | Ganesha V1 SMTP configuration is working"
+        try:
+            send_email(env, test_line)
+            print("SHADOW EMAIL TEST SENT", flush=True)
+            return 0
+        except Exception as exc:
+            print(f"SHADOW EMAIL TEST ERROR | {exc}", flush=True)
+            return 1
+
+    if email_enabled(env):
+        print(
+            "SHADOW EMAIL ALERTS: ENABLED | "
+            f"TO={setting(env, 'SHADOW_EMAIL_TO')}",
+            flush=True,
+        )
+    else:
+        print("SHADOW EMAIL ALERTS: DISABLED", flush=True)
+
+    print(f"LIVE SYMBOL UNIVERSE: {len(args.symbols)} symbols", flush=True)
+    print(
+        "LIVE SESSION STOP: 15:35 IST (5-minute grace after NSE regular close)",
+        flush=True,
+    )
+
+    command = [
+        sys.executable,
+        "-m",
+        "src.ingestion.live_swing_monitor",
+        "--symbols",
+        *args.symbols,
+        "--shadow-model",
+        str(args.shadow_model),
+    ]
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="", flush=True)
+        if not line.startswith(PREFIX) or not email_enabled(env):
+            if _after_market_close():
+                print("LIVE SESSION COMPLETE | stopping monitor after 15:35 IST", flush=True)
+                process.terminate()
+                break
+            continue
+        try:
+            send_email(env, line.rstrip("\n"))
+            print("SHADOW EMAIL SENT", flush=True)
+        except Exception as exc:
+            print(f"SHADOW EMAIL ERROR | {exc}", flush=True)
+        if _after_market_close():
+            print("LIVE SESSION COMPLETE | stopping monitor after 15:35 IST", flush=True)
+            process.terminate()
+            break
+
+    return_code = process.wait()
+    print(f"LIVE MONITOR EXIT CODE: {return_code}", flush=True)
+    return return_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

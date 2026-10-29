@@ -4,24 +4,55 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
-from typing import Iterable, Optional, Sequence
+from pathlib import Path
+from typing import Callable, Iterable, Optional, Sequence
 
 from src.ingestion.live_analysis_engine import LiveAnalysisEngine
 from src.ingestion.live_candle_engine import LiveCandleEngine
 from src.ingestion.market_data_client import MarketDataClient
 from src.ingestion.one_minute_candle_builder import OneMinuteCandle
+from src.prediction.candidate_shadow import CandidateShadowPredictor
 
 
 class LiveSwingMonitor:
     """Warm symbols from FYERS history and then stream live ticks."""
 
-    def __init__(self, symbols: Iterable[str], signal_handler=None) -> None:
+    def __init__(
+        self,
+        symbols: Iterable[str],
+        signal_handler: Optional[Callable[[str, list], None]] = None,
+        shadow_model_path: Path | str = "models/entry_prediction_extra_trees_candidate_v1.joblib",
+    ) -> None:
         self.symbols = tuple(sorted({str(s).strip() for s in symbols if str(s).strip()}))
         if not self.symbols:
             raise ValueError("At least one FYERS symbol is required")
 
-        self.analysis = LiveAnalysisEngine(signal_handler=signal_handler)
+        self.shadow_predictor = CandidateShadowPredictor(shadow_model_path)
+        self._signal_handler = signal_handler
+        self.analysis = LiveAnalysisEngine(signal_handler=self._handle_signals)
         self.candle_engine = LiveCandleEngine(candle_handler=self._handle_candle)
+
+    def _handle_signals(self, symbol: str, signals: list) -> None:
+        """Observe daily signals with the candidate without affecting decisions."""
+        if self._signal_handler:
+            self._signal_handler(symbol, signals)
+
+        if not self.shadow_predictor.available:
+            return
+
+        features = self.analysis.dataframe(symbol)
+        for signal in signals:
+            shadow = self.shadow_predictor.predict(signal, features)
+            if not shadow.available:
+                continue
+            print(
+                "SHADOW ENTRY PREDICTION | "
+                f"{shadow.symbol} | {shadow.setup_type} | "
+                f"P={shadow.probability_target_before_stop:.4f} | "
+                f"CONF={shadow.confidence:.4f} | "
+                f"MODEL={shadow.model_version}",
+                flush=True,
+            )
 
     def _handle_candle(self, candle: OneMinuteCandle) -> None:
         """Log completed one-minute candles before forwarding them to analysis."""
@@ -114,15 +145,22 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="FYERS symbols to monitor, e.g. NSE:TCS-EQ NSE:INFY-EQ",
     )
+    parser.add_argument(
+        "--shadow-model",
+        type=Path,
+        default=Path("models/entry_prediction_extra_trees_candidate_v1.joblib"),
+        help="Candidate model bundle for read-only shadow inference",
+    )
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run the live monitor from the command line."""
     args = build_parser().parse_args(argv)
-    monitor = LiveSwingMonitor(args.symbols)
+    monitor = LiveSwingMonitor(args.symbols, shadow_model_path=args.shadow_model)
 
     print(f"=== GANESHA V1 LIVE MONITOR | {', '.join(monitor.symbols)} ===", flush=True)
+    print(f"SHADOW MODEL AVAILABLE: {monitor.shadow_predictor.available}", flush=True)
     try:
         counts = monitor.run()
         print(f"WARM-UP COMPLETE: {counts}", flush=True)

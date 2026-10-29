@@ -11,13 +11,18 @@ import os
 import smtplib
 import subprocess
 import sys
+from datetime import datetime, time
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Sequence
+from zoneinfo import ZoneInfo
 
 from scripts.trend_pullback_validation_universe_v1 import TREND_PULLBACK_VALIDATION_SYMBOLS
 
 PREFIX = "SHADOW ENTRY PREDICTION | "
+IST = ZoneInfo("Asia/Kolkata")
+NSE_REGULAR_CLOSE = time(15, 30)
+LIVE_STOP_GRACE_MINUTES = 5
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -118,6 +123,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _after_market_close() -> bool:
+    """Return True only after a short post-close grace period for finalization."""
+    now = datetime.now(IST)
+    stop_at_minutes = NSE_REGULAR_CLOSE.hour * 60 + NSE_REGULAR_CLOSE.minute + LIVE_STOP_GRACE_MINUTES
+    return now.hour * 60 + now.minute >= stop_at_minutes
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     env = load_dotenv(args.env_file)
@@ -145,6 +157,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("SHADOW EMAIL ALERTS: DISABLED", flush=True)
 
     print(f"LIVE SYMBOL UNIVERSE: {len(args.symbols)} symbols", flush=True)
+    print(
+        "LIVE SESSION STOP: 15:35 IST (5-minute grace after NSE regular close)",
+        flush=True,
+    )
 
     command = [
         sys.executable,
@@ -168,12 +184,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     for line in process.stdout:
         print(line, end="", flush=True)
         if not line.startswith(PREFIX) or not email_enabled(env):
+            if _after_market_close():
+                print("LIVE SESSION COMPLETE | stopping monitor after 15:35 IST", flush=True)
+                process.terminate()
+                break
             continue
         try:
             send_email(env, line.rstrip("\n"))
             print("SHADOW EMAIL SENT", flush=True)
         except Exception as exc:
             print(f"SHADOW EMAIL ERROR | {exc}", flush=True)
+        if _after_market_close():
+            print("LIVE SESSION COMPLETE | stopping monitor after 15:35 IST", flush=True)
+            process.terminate()
+            break
 
     return_code = process.wait()
     print(f"LIVE MONITOR EXIT CODE: {return_code}", flush=True)

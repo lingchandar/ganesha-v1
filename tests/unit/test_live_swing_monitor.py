@@ -15,7 +15,8 @@ def test_monitor_requires_symbols():
 def test_monitor_deduplicates_symbols():
     monitor = LiveSwingMonitor(["NSE:TCS-EQ", "NSE:TCS-EQ"])
     assert monitor.symbols == ("NSE:TCS-EQ",)
-    assert monitor.shadow_predictor.available is False
+    expected_available = Path("models/entry_prediction_extra_trees_candidate_v1.joblib").exists()
+    assert monitor.shadow_predictor.available is expected_available
 
 
 def test_monitor_accepts_shadow_model_path():

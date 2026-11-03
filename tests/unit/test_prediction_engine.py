@@ -47,12 +47,23 @@ def test_feature_builder_is_point_in_time_shaped():
     assert frame.isna().sum().sum() == 0
 
 
-def test_feature_builder_adds_regime_interactions():
+def test_feature_builder_adds_regime_features():
     frame = PredictionFeatureBuilder.build(_signal(), _features())
-    assert frame.loc[0, "trend_bullish"] == 1.0
-    assert frame.loc[0, "trend_bearish"] == 0.0
-    assert frame.loc[0, "momentum_positive"] == 1.0
-    assert frame.loc[0, "momentum_negative"] == 0.0
-    assert frame.loc[0, "return_5d_x_trend_bullish"] > 0.0
-    assert frame.loc[0, "atr_pct_x_trend_bullish"] > 0.0
-    assert frame.loc[0, "atr_expansion_x_trend_bullish"] > 0.0
+    assert frame.loc[0, "price_vs_ema20_pct"] > 0.0
+    assert frame.loc[0, "price_vs_ema50_pct"] > 0.0
+    assert frame.loc[0, "price_vs_ema200_pct"] > 0.0
+    assert frame.loc[0, "ema20_vs_ema50_pct"] > 0.0
+    assert frame.loc[0, "ema50_vs_ema200_pct"] > 0.0
+    assert frame.loc[0, "ema50_slope_20"] == 0.2
+    assert frame.loc[0, "plus_di_minus_di"] == 10.0
+    assert frame.loc[0, "atr_expansion_ratio"] > 1.0
+
+
+def test_feature_builder_sets_only_matching_setup_flag():
+    frame = PredictionFeatureBuilder.build(_signal(), _features())
+    assert frame.loc[0, "setup_trend_pullback"] == 1.0
+    assert frame.loc[0, "setup_classic_resistance_breakout"] == 0.0
+    assert frame.loc[0, "setup_breakout_retest"] == 0.0
+    assert frame.loc[0, "setup_demand_support_bounce"] == 0.0
+    assert frame.loc[0, "setup_trend_continuation_flag"] == 0.0
+    assert frame.loc[0, "setup_rs_leader_breakout"] == 0.0
